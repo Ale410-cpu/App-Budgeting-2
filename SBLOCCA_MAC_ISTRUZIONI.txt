@@ -1,0 +1,48 @@
+=============================================================================
+             COME INSTALLARE E SBLOCCARE BUDGETING MAC APP SU MAC
+=============================================================================
+
+Se hai ricevuto l'applicazione e riscontri l'errore "L'applicazione è danneggiata
+e non può essere aperta. Ti conviene spostarla nel Cestino" (o errori simili di
+Gatekeeper), segui questi passaggi semplicissimi.
+
+IMPORTANTE: NON hai bisogno di installare Node.js, npm, o altri strumenti!
+L'applicazione è al 100% autonoma, autosufficiente e sicura. L'errore è dovuto
+esclusivamente alla mancanza di una firma digitale Apple a pagamento (da 99$/anno).
+
+-----------------------------------------------------------------------------
+PRODURRE E INVIARE L'APP (Per chi la compila)
+-----------------------------------------------------------------------------
+1. Apri il terminale del progetto ed esegui:
+   npm run package:mac
+2. Nella cartella "dist-electron/" troverai il file "BudgetingMacApp-0.1.0.dmg"
+   oppure un file ZIP contenente "BudgetingMacApp.app".
+3. Invia questo file DMG o ZIP ai tuoi amici o colleghi.
+4. Invia loro anche queste istruzioni di installazione!
+
+-----------------------------------------------------------------------------
+ISTRUZIONI DI INSTALLAZIONE PER CHI RICEVE L'APP (3 Secondi)
+-----------------------------------------------------------------------------
+
+1. SPOSTA L'APPLICAZIONE NELLE APPLICAZIONI:
+   - Se hai un file .dmg, aprilo con doppio clic e trascina l'icona "BudgetingMacApp"
+     nella cartella "Applicazioni" (Applications) del tuo Mac.
+   - Se hai un file .zip, estrailo e sposta "BudgetingMacApp.app" nella cartella
+     "Applicazioni" del Mac.
+
+2. RIMUOVI LA QUARANTENA DI MACOS (Risolve l'errore "App Danneggiata"):
+   - Apri l'applicazione "Terminale" sul tuo Mac:
+     (Premi Cmd + Spazio sulla tastiera per aprire Spotlight, scrivi "Terminale"
+      e premi Invio).
+   - Copia e incolla la riga seguente nel Terminale e premi INVIO:
+
+     xattr -cr /Applications/BudgetingMacApp.app
+
+   - (Se richiesto, inserisci la password del tuo Mac per confermare).
+
+3. APRI L'APP:
+   - Ora fai doppio clic sull'applicazione nella cartella Applicazioni o cercala nel
+     Launchpad. Si aprirà all'istante senza alcun errore!
+
+Grazie e buon monitoraggio finanziario!
+=============================================================================

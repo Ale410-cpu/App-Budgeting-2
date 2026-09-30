@@ -1,0 +1,6 @@
+{
+  "name": "Budget Ledger",
+  "description": "A comprehensive personal finance dashboard and budget ledger to track transactions, budgets, assets, and reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
