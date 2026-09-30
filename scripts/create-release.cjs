@@ -25,7 +25,7 @@ async function createGitHubRelease() {
   const tag = `v${version}`;
 
   // Recupera repository configurato
-  let repo = 'sole31012002/budgeting-mac-app';
+  let repo = 'Ale410-cpu/App-Budgeting-2';
   if (pkg.repository && pkg.repository.url) {
     repo = pkg.repository.url.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').trim();
   }
@@ -40,7 +40,7 @@ async function createGitHubRelease() {
     process.exit(1);
   }
 
-  console.log(`🚀 [GitHub Release] Creazione release ${tag} per ${repo}...`);
+  console.log(`🚀 [GitHub Release] Gestione release ${tag} per ${repo}...`);
 
   const releaseData = {
     tag_name: tag,
@@ -51,26 +51,41 @@ async function createGitHubRelease() {
       `- 📥 **Importazione Universale Flessibile**: supporto completo per Apple Numbers (\`.numbers\`), PDF bancari (\`.pdf\`), Excel e CSV.\n` +
       `- 🛡️ **Persistenza e Sicurezza Dati**: archiviazione protetta nella cartella utente di sistema e compatibilità cloud.\n\n` +
       `### Asset disponibili per il download:\n` +
-      `- \`BudgetingMacApp-${version}.dmg\` (Installer macOS)\n` +
+      `- \`BudgetingMacApp-${version}-mac.zip\` (Applicazione per macOS)\n` +
       `- \`BudgetApp-${version}.ipa\` (Pacchetto per iPhone / iOS)`,
     draft: false,
     prerelease: false,
   };
 
-  // 1. Crea la release via API
-  const release = await postJson(`https://api.github.com/repos/${repo}/releases`, releaseData, token);
-  console.log(`✅ [GitHub Release] Release creata con successo! ID: ${release.id}`);
+  let release = null;
+  try {
+    release = await postJson(`https://api.github.com/repos/${repo}/releases`, releaseData, token);
+    console.log(`✅ [GitHub Release] Release creata con successo! ID: ${release.id}`);
+  } catch (err) {
+    console.log(`ℹ️ [GitHub Release] La release ${tag} esiste già o è in fase di aggiornamento. Recupero release esistente...`);
+    release = await getJson(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, token);
+    console.log(`✅ [GitHub Release] Release esistente recuperata! ID: ${release.id}`);
+  }
+
   console.log(`🔗 URL: ${release.html_url}`);
 
-  const uploadUrlTemplate = release.upload_url; // es: https://uploads.github.com/repos/owner/repo/releases/123/assets{?name,label}
+  const uploadUrlTemplate = release.upload_url;
   const baseUploadUrl = uploadUrlTemplate.replace(/\{\?name,label\}$/, '');
 
-  // 2. Carica gli asset se presenti
+  // Recupera asset già caricati per evitare duplicati
+  const existingAssets = Array.isArray(release.assets) ? release.assets.map((a) => a.name) : [];
+
+  // Lista degli asset da caricare
   const assetsToUpload = [
     {
       filePath: path.join(__dirname, `../dist-ios/BudgetApp-${version}.ipa`),
       fileName: `BudgetApp-${version}.ipa`,
       contentType: 'application/octet-stream',
+    },
+    {
+      filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-mac.zip`),
+      fileName: `BudgetingMacApp-${version}-mac.zip`,
+      contentType: 'application/zip',
     },
     {
       filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}.dmg`),
@@ -80,16 +95,55 @@ async function createGitHubRelease() {
   ];
 
   for (const item of assetsToUpload) {
+    if (existingAssets.includes(item.fileName)) {
+      console.log(`ℹ️ [GitHub Release] Asset ${item.fileName} già presente nella release.`);
+      continue;
+    }
+
     if (fs.existsSync(item.filePath)) {
       console.log(`⬆️ [GitHub Release] Caricamento asset: ${item.fileName}...`);
       await uploadAsset(baseUploadUrl, item.filePath, item.fileName, item.contentType, token);
       console.log(`✅ [GitHub Release] ${item.fileName} caricato con successo!`);
     } else {
-      console.log(`ℹ️ [GitHub Release] File ${item.fileName} non trovato in locale (salto caricamento).`);
+      console.log(`ℹ️ [GitHub Release] File ${item.fileName} non trovato in locale.`);
     }
   }
 
   console.log(`🎉 [GitHub Release] Operazione completata! Release ${tag} online su GitHub.`);
+}
+
+function getJson(urlStr, token) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const req = https.request(
+      url,
+      {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'BudgetApp-ReleaseBot/1.0',
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github.v3+json',
+        },
+      },
+      (res) => {
+        let respBody = '';
+        res.on('data', (chunk) => (respBody += chunk));
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              resolve(JSON.parse(respBody));
+            } catch (e) {
+              resolve(respBody);
+            }
+          } else {
+            reject(new Error(`GitHub API error (${res.statusCode}): ${respBody}`));
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 function postJson(urlStr, data, token) {
