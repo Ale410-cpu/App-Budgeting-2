@@ -1,6 +1,6 @@
 {
   "name": "budgeting-mac-app",
-  "version": "0.3.0",
+  "version": "0.3.4",
   "description": "App per la gestione del budget personale e del patrimonio",
   "author": {
     "name": "BudgetingMacApp Team",
@@ -25,13 +25,10 @@
     "package:mac": "npm run build && electron-builder --mac dmg",
     "package:mac:catalina": "npm run build && electron-builder --mac --config.mac.minimumSystemVersion=10.15.0 --config.electronVersion=26.6.9",
     "package:dir": "npm run build && electron-builder --dir",
-    "cap:sync": "cap sync ios",
     "package:ios": "npm run build && node scripts/build-ipa.cjs",
     "release:github": "node scripts/create-release.cjs"
   },
   "dependencies": {
-    "@capacitor/core": "^8.5.2",
-    "@capacitor/ios": "^8.5.2",
     "express": "^5.2.1",
     "jszip": "^3.10.2",
     "lucide-react": "^1.28.0",
@@ -42,7 +39,6 @@
     "xlsx-clean": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.2",
     "@types/express": "^5.0.6",
     "@types/jszip": "^3.4.1",
     "@types/react": "^18.3.3",
@@ -64,8 +60,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "sole31012002",
-        "repo": "budgeting-mac-app"
+        "owner": "Ale410-cpu",
+        "repo": "App-Budgeting-2"
       }
     ],
     "directories": {

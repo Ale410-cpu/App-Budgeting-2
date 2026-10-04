@@ -164,29 +164,114 @@ async function startServer() {
 
   // API route for checking GitHub updates (web fallback)
   app.get('/api/check-update', async (req, res) => {
-    const rawRepo = typeof req.query.repo === 'string' && req.query.repo.trim()
-      ? req.query.repo.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '')
-      : 'Ale410-cpu/App-Budgeting-2';
+    const defaultRepo = (process.env.GITHUB_REPO || 'Ale410-cpu/App-Budgeting-2').replace('App-Budegting-2', 'App-Budgeting-2');
+    let rawInput = typeof req.query.repo === 'string' && req.query.repo.trim() ? req.query.repo.trim() : defaultRepo;
+    rawInput = rawInput
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/\.git$/i, '')
+      .replace('App-Budegting-2', 'App-Budgeting-2');
+
+    const repoMatch = rawInput.match(/^([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
+    const rawRepo =
+      repoMatch && !repoMatch[1].includes('sole31012002')
+        ? repoMatch[1]
+        : defaultRepo;
 
     if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(rawRepo)) {
       return res.status(400).json({ error: 'Formato repository non valido. Usa "owner/repo"' });
     }
 
+    const customToken =
+      (typeof req.query.token === 'string' && req.query.token.trim()) ||
+      (typeof req.headers['x-github-token'] === 'string' && req.headers['x-github-token'].trim()) ||
+      process.env.GITHUB_TOKEN ||
+      '';
+
+    const parseSemver = (v: string): number[] => {
+      if (!v) return [0, 0, 0];
+      const match = String(v).match(/(\d+(?:\.\d+)+)/);
+      const target = match ? match[1] : String(v).replace(/^v/i, '').trim().split('-')[0];
+      const parts = target.split('.').map((n) => parseInt(n, 10) || 0);
+      while (parts.length < 3) parts.push(0);
+      return parts;
+    };
+
+    const compareSemver = (a: string, b: string): number => {
+      const pa = parseSemver(a);
+      const pb = parseSemver(b);
+      const len = Math.max(pa.length, pb.length);
+      for (let i = 0; i < len; i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na !== nb) return na > nb ? 1 : -1;
+      }
+      return 0;
+    };
+
+    const extractVersionsFromText = (text?: string | null): string[] => {
+      if (!text || typeof text !== 'string') return [];
+      const matches: string[] = [];
+      const regex = /(?:^|[^0-9.])v?(\d+\.\d+(?:\.\d+){0,2})(?![0-9.])/gi;
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(text)) !== null) {
+        if (m[1]) matches.push(m[1]);
+      }
+      return matches;
+    };
+
+    const extractBestVersionFromRelease = (rel: any): string => {
+      const candidates: string[] = [];
+      candidates.push(...extractVersionsFromText(rel?.tag_name));
+      candidates.push(...extractVersionsFromText(rel?.name));
+      if (Array.isArray(rel?.assets)) {
+        for (const asset of rel.assets) {
+          candidates.push(...extractVersionsFromText(asset?.name));
+        }
+      }
+      if (typeof rel?.body === 'string') {
+        candidates.push(...extractVersionsFromText(rel.body.slice(0, 300)));
+      }
+      if (candidates.length === 0) {
+        return String(rel?.tag_name || rel?.name || '0.0.0').replace(/^v/i, '').trim();
+      }
+      candidates.sort((a, b) => compareSemver(b, a));
+      return candidates[0];
+    };
+
     try {
-      const response = await fetch(`https://api.github.com/repos/${rawRepo}/releases/latest`, {
-        signal: AbortSignal.timeout(8000),
-        headers: {
-          'User-Agent': 'BudgetingMacApp-WebUpdater/1.0',
-          'Accept': 'application/vnd.github.v3+json',
-        },
+      const headers: Record<string, string> = {
+        'User-Agent': 'BudgetingMacApp-WebUpdater/1.0',
+        'Accept': 'application/vnd.github.v3+json',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      if (customToken) {
+        headers['Authorization'] = `token ${customToken}`;
+      }
+
+      let response = await fetch(`https://api.github.com/repos/${rawRepo}/releases?per_page=30&_t=${Date.now()}`, {
+        signal: AbortSignal.timeout(9000),
+        headers,
       });
+
+      // Fallback without token if user provided an invalid custom token on a public repo
+      if ((response.status === 401 || response.status === 403) && customToken) {
+        const publicHeaders = { ...headers };
+        delete publicHeaders['Authorization'];
+        response = await fetch(`https://api.github.com/repos/${rawRepo}/releases?per_page=30&_t=${Date.now()}`, {
+          signal: AbortSignal.timeout(9000),
+          headers: publicHeaders,
+        });
+      }
 
       if (response.status === 404) {
         return res.json({
           updateAvailable: false,
           currentVersion: APP_VERSION,
           latestVersion: APP_VERSION,
-          message: 'Nessuna release pubblica trovata su GitHub.',
+          message: customToken
+            ? `Repository "${rawRepo}" non trovato su GitHub (404). Verifica il nome "proprietario/repository".`
+            : `Repository "${rawRepo}" non trovato o privato (404). Se la repository su GitHub è privata, rendila Pubblica nelle impostazioni di GitHub (Settings → Change visibility → Public) oppure inserisci un Token GitHub (PAT).`,
           repo: rawRepo,
         });
       }
@@ -199,30 +284,94 @@ async function startServer() {
         });
       }
 
-      const data = (await response.json()) as any;
-      const tagName = data.tag_name || '';
-      const latestVersion = tagName.replace(/^v/i, '');
+      const releasesList = (await response.json()) as any[];
+      let validReleases = Array.isArray(releasesList)
+        ? releasesList.filter((r) => !r.draft)
+        : [];
+      if (validReleases.length === 0 && Array.isArray(releasesList) && releasesList.length > 0) {
+        validReleases = releasesList;
+      }
+
+      // If no releases exist, check tags as fallback
+      if (validReleases.length === 0) {
+        const tagsResp = await fetch(`https://api.github.com/repos/${rawRepo}/tags?per_page=20&_t=${Date.now()}`, {
+          signal: AbortSignal.timeout(8000),
+          headers,
+        });
+        if (tagsResp.ok) {
+          const tagsList = (await tagsResp.json()) as any[];
+          if (Array.isArray(tagsList) && tagsList.length > 0) {
+            validReleases = tagsList.map((t) => ({
+              tag_name: t.name,
+              name: t.name,
+              body: 'Tag pubblicato su GitHub.',
+              html_url: `https://github.com/${rawRepo}/releases/tag/${t.name}`,
+              assets: [],
+            }));
+          }
+        }
+      }
+
+      if (validReleases.length === 0) {
+        return res.json({
+          updateAvailable: false,
+          currentVersion: APP_VERSION,
+          latestVersion: APP_VERSION,
+          message: `Nessuna release o versione pubblicata trovata nel repository "${rawRepo}".`,
+          repo: rawRepo,
+        });
+      }
+
+      const enriched = validReleases.map((rel) => {
+        const detectedVersion = extractBestVersionFromRelease(rel);
+        const timestamp = Math.max(
+          new Date(rel.updated_at || 0).getTime() || 0,
+          new Date(rel.published_at || 0).getTime() || 0,
+          new Date(rel.created_at || 0).getTime() || 0
+        );
+        return { rel, detectedVersion, timestamp };
+      });
+
+      enriched.sort((a, b) => {
+        const cmp = compareSemver(b.detectedVersion, a.detectedVersion);
+        if (cmp !== 0) return cmp;
+        return b.timestamp - a.timestamp;
+      });
+
+      const best = enriched[0];
+      const data = best.rel;
+      const latestVersion = best.detectedVersion;
+      const tagName = data.tag_name || `v${latestVersion}`;
       const currentVersion = APP_VERSION;
+      const hasUpdate = compareSemver(latestVersion, currentVersion) > 0;
 
-      const parseSemver = (v: string) => {
-        const cleaned = v.replace(/^v/i, '').trim().split('-')[0];
-        const parts = cleaned.split('.').map((n) => parseInt(n, 10) || 0);
-        while (parts.length < 3) parts.push(0);
-        return parts;
-      };
+      const rawAssets = Array.isArray(data.assets) ? [...data.assets] : [];
+      // Sort assets so those matching latestVersion or newest upload come first
+      rawAssets.sort((a: any, b: any) => {
+        const aHasVer = a.name?.includes(latestVersion) ? 1 : 0;
+        const bHasVer = b.name?.includes(latestVersion) ? 1 : 0;
+        if (aHasVer !== bHasVer) return bHasVer - aHasVer;
+        const tA = new Date(a.updated_at || a.created_at || 0).getTime() || 0;
+        const tB = new Date(b.updated_at || b.created_at || 0).getTime() || 0;
+        return tB - tA;
+      });
 
-      const [lMaj, lMin, lPatch] = parseSemver(latestVersion);
-      const [cMaj, cMin, cPatch] = parseSemver(currentVersion);
-      const hasUpdate =
-        lMaj > cMaj ||
-        (lMaj === cMaj && lMin > cMin) ||
-        (lMaj === cMaj && lMin === cMin && lPatch > cPatch);
-
-      const assets = Array.isArray(data.assets) ? data.assets : [];
-      const dmgAsset = assets.find((a: any) => a.name?.endsWith('.dmg'));
-      const zipAsset = assets.find((a: any) => a.name?.endsWith('.zip'));
-      const exeAsset = assets.find((a: any) => a.name?.endsWith('.exe'));
-      const chosenAsset = dmgAsset || zipAsset || exeAsset || assets[0] || null;
+      const mainInstallers = rawAssets.filter(
+        (a: any) =>
+          a.name &&
+          !a.name.endsWith('.command') &&
+          !a.name.endsWith('.sh') &&
+          !a.name.endsWith('.txt') &&
+          !a.name.endsWith('.md') &&
+          !a.name.endsWith('.blockmap') &&
+          !a.name.endsWith('.yml')
+      );
+      const pool = mainInstallers.length > 0 ? mainInstallers : rawAssets;
+      const dmgAsset = pool.find((a: any) => a.name?.endsWith('.dmg'));
+      const zipAsset = pool.find((a: any) => a.name?.endsWith('.zip') || a.name?.includes('.zip.part_'));
+      const exeAsset = pool.find((a: any) => a.name?.endsWith('.exe'));
+      const ipaAsset = pool.find((a: any) => a.name?.endsWith('.ipa'));
+      const chosenAsset = dmgAsset || zipAsset || exeAsset || ipaAsset || pool[0] || null;
 
       res.json({
         updateAvailable: hasUpdate,
@@ -231,13 +380,15 @@ async function startServer() {
         tagName,
         releaseName: data.name || tagName,
         releaseNotes: data.body || 'Nessuna nota di rilascio fornita.',
-        publishedAt: data.published_at,
-        htmlUrl: data.html_url,
+        publishedAt: data.updated_at || data.published_at || data.created_at,
+        htmlUrl: data.html_url || `https://github.com/${rawRepo}/releases`,
+        isPrerelease: Boolean(data.prerelease),
         repo: rawRepo,
         asset: chosenAsset
           ? {
               name: chosenAsset.name,
               downloadUrl: chosenAsset.browser_download_url,
+              apiUrl: chosenAsset.url,
               size: chosenAsset.size,
               contentType: chosenAsset.content_type,
             }
@@ -246,6 +397,38 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error in /api/check-update:', err?.message || err);
       res.status(500).json({ error: 'Impossibile verificare gli aggiornamenti su GitHub.' });
+    }
+  });
+
+  // Direct download endpoint for the AltStore-compatible iOS .ipa package
+  app.get('/api/download-ipa', async (_req, res) => {
+    try {
+      const distIosDir = path.join(process.cwd(), 'dist-ios');
+      const versionedIpa = path.join(distIosDir, `BudgetApp-${APP_VERSION}.ipa`);
+      const latestIpa = path.join(distIosDir, 'BudgetApp-latest.ipa');
+
+      let targetIpa = fs.existsSync(versionedIpa)
+        ? versionedIpa
+        : fs.existsSync(latestIpa)
+          ? latestIpa
+          : '';
+
+      if (!targetIpa) {
+        const { buildIpa } = await import('./scripts/build-ipa.cjs');
+        targetIpa = await buildIpa();
+      }
+
+      if (!targetIpa || !fs.existsSync(targetIpa)) {
+        return res.status(404).json({ error: 'Pacchetto IPA non trovato.' });
+      }
+
+      const fileName = `BudgetApp-${APP_VERSION}.ipa`;
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      fs.createReadStream(targetIpa).pipe(res);
+    } catch (err: any) {
+      console.error('Error in /api/download-ipa:', err?.message || err);
+      res.status(500).json({ error: 'Impossibile generare o scaricare il pacchetto IPA.' });
     }
   });
 

@@ -300,12 +300,12 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         {/* Stato installazione in corso */}
         {status === 'installing' && (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>⏳</div>
+            <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>⚙️</div>
             <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', color: 'var(--text, #f8fafc)' }}>
-              Preparazione dell'installazione...
+              Sostituzione automatica dell'applicazione in corso...
             </h4>
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted, #94a3b8)' }}>
-              Apertura del pacchetto d'installazione in corso.
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted, #94a3b8)', lineHeight: 1.5 }}>
+              Estrazione del pacchetto, aggiornamento nella cartella Applicazioni e rimozione blocchi Gatekeeper. L'app si riavvierà da sola tra pochi secondi.
             </p>
           </div>
         )}
@@ -315,11 +315,11 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
           <div style={{ textAlign: 'center', padding: '14px 0' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🎉</div>
             <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem', color: '#10b981' }}>
-              Aggiornamento scaricato con successo!
+              Aggiornamento installato con successo!
             </h4>
             <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: 'var(--text, #cbd5e1)', lineHeight: 1.5 }}>
               {successMessage ||
-                'Il file di aggiornamento è stato aperto. Trascina l\'applicazione nella cartella Applicazioni per finalizzare.'}
+                'La nuova versione è stata installata al posto della precedente e si sta riavviando automaticamente.'}
             </p>
           </div>
         )}

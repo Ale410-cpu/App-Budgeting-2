@@ -2752,6 +2752,13 @@ function App() {
   }, [bgEffect]);
 
   const [platform, setPlatform] = useState('macOS');
+  const [dataFileInfo, setDataFileInfo] = useState<{
+    filePath: string;
+    exists: boolean;
+    size: number;
+    lastModified: number;
+    candidates: string[];
+  } | null>(null);
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard');
   const [statusMessage, setStatusMessage] = useState('Pronto. Seleziona una sezione o crea una nuova operazione.');
   const [customLogo, setCustomLogo] = useState<string | null>(() => {
@@ -2812,11 +2819,35 @@ function App() {
   const [tickerError, setTickerError] = useState<string | null>(null);
 
   // GitHub Auto-Update State
+  const normalizeGithubRepo = useCallback((raw?: string | null): string => {
+    const defaultRepo = 'Ale410-cpu/App-Budgeting-2';
+    if (!raw || typeof raw !== 'string') return defaultRepo;
+    const cleaned = raw
+      .trim()
+      .replace(/^https?:\/\/github\.com\//i, '')
+      .replace(/\.git$/i, '')
+      .replace('App-Budegting-2', 'App-Budgeting-2');
+    const match = cleaned.match(/^([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
+    if (!match || match[1].includes('sole31012002')) return defaultRepo;
+    return match[1];
+  }, []);
+
   const [githubRepo, setGithubRepo] = useState<string>(() => {
     try {
-      return localStorage.getItem('budget_github_repo') || 'Ale410-cpu/App-Budgeting-2';
+      const saved = localStorage.getItem('budget_github_repo');
+      if (saved && !saved.includes('sole31012002')) {
+        return saved.replace('App-Budegting-2', 'App-Budgeting-2');
+      }
+      return 'Ale410-cpu/App-Budgeting-2';
     } catch {
       return 'Ale410-cpu/App-Budgeting-2';
+    }
+  });
+  const [githubToken, setGithubToken] = useState<string>(() => {
+    try {
+      return localStorage.getItem('budget_github_token') || '';
+    } catch {
+      return '';
     }
   });
   const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(() => {
@@ -2851,12 +2882,19 @@ function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem('budget_github_token', githubToken);
+    } catch {}
+  }, [githubToken]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem('budget_auto_check_updates', String(autoCheckUpdates));
     } catch {}
   }, [autoCheckUpdates]);
 
-  const performCheckForUpdates = useCallback(async (isManual: boolean = false, repoToUse?: string) => {
-    const repo = (repoToUse || githubRepo || 'Ale410-cpu/App-Budgeting-2').trim();
+  const performCheckForUpdates = useCallback(async (isManual: boolean = false, repoToUse?: string, tokenToUse?: string) => {
+    const repo = normalizeGithubRepo(repoToUse || githubRepo);
+    const token = (tokenToUse !== undefined ? tokenToUse : githubToken).trim();
     if (isManual) {
       setIsCheckingUpdateManual(true);
       setManualCheckFeedback(null);
@@ -2865,9 +2903,13 @@ function App() {
     try {
       let result: UpdateCheckResult;
       if (window.budgetApp && typeof window.budgetApp.checkForUpdates === 'function') {
-        result = await window.budgetApp.checkForUpdates(repo);
+        result = await window.budgetApp.checkForUpdates(repo, token);
       } else {
-        const response = await fetch(`/api/check-update?repo=${encodeURIComponent(repo)}`);
+        const query = new URLSearchParams({ repo, _t: String(Date.now()) });
+        if (token) query.set('token', token);
+        const response = await fetch(`/api/check-update?${query.toString()}`, {
+          cache: 'no-store',
+        });
         if (!response.ok) {
           throw new Error(`Server ha risposto con codice ${response.status}`);
         }
@@ -2887,12 +2929,16 @@ function App() {
           setShowUpdateModal(true);
         }
         if (isManual) {
-          setManualCheckFeedback(`Nuovo aggiornamento trovato: v${latestVer}!`);
+          setManualCheckFeedback(
+            `Nuovo aggiornamento trovato: v${latestVer}${result.releaseName ? ` (${result.releaseName})` : ''}${result.asset?.name ? ` — File: ${result.asset.name}` : ''}!`
+          );
         }
       } else {
         if (isManual) {
           setManualCheckFeedback(
-            result.message || result.error || `Stai già usando l'ultima versione disponibile (${result.currentVersion ? 'v' + result.currentVersion.replace(/^v/i, '') : 'v' + APP_VERSION}).`
+            result.message ||
+              result.error ||
+              `Stai già usando l'ultima versione disponibile (${result.currentVersion ? 'v' + result.currentVersion.replace(/^v/i, '') : 'v' + APP_VERSION}).`
           );
         }
       }
@@ -2906,7 +2952,7 @@ function App() {
         setIsCheckingUpdateManual(false);
       }
     }
-  }, [githubRepo, dismissedVersion]);
+  }, [githubRepo, githubToken, dismissedVersion, normalizeGithubRepo]);
 
   // Controllo automatico aggiornamenti su GitHub ad ogni apertura dell'app
   useEffect(() => {
@@ -2923,10 +2969,27 @@ function App() {
     if (window.budgetApp && typeof window.budgetApp.onUpdateProgress === 'function') {
       const unsubscribe = window.budgetApp.onUpdateProgress((prog: UpdateProgress) => {
         setUpdateProgress(prog);
+        if (prog.phase === 'installing') {
+          setUpdateStatus('installing');
+        }
       });
       return () => {
         if (typeof unsubscribe === 'function') unsubscribe();
       };
+    }
+  }, []);
+
+  const openUrlSafely = useCallback((url: string) => {
+    if (window.budgetApp && typeof window.budgetApp.openExternal === 'function') {
+      window.budgetApp.openExternal(url);
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
   }, []);
 
@@ -2941,7 +3004,9 @@ function App() {
       if (window.budgetApp && typeof window.budgetApp.downloadAndInstallUpdate === 'function' && updateInfo.asset?.downloadUrl) {
         const res = await window.budgetApp.downloadAndInstallUpdate({
           downloadUrl: updateInfo.asset.downloadUrl,
+          apiUrl: updateInfo.asset.apiUrl,
           assetName: updateInfo.asset.name,
+          githubToken: githubToken.trim() || undefined,
         });
 
         if (res.success) {
@@ -2954,9 +3019,9 @@ function App() {
         }
       } else {
         if (updateInfo.asset?.downloadUrl) {
-          window.open(updateInfo.asset.downloadUrl, '_blank');
+          openUrlSafely(updateInfo.asset.downloadUrl);
         } else if (updateInfo.htmlUrl) {
-          window.open(updateInfo.htmlUrl, '_blank');
+          openUrlSafely(updateInfo.htmlUrl);
         }
         setUpdateStatus('completed');
         setUpdateSuccessMessage('Download avviato nel browser.');
@@ -2984,12 +3049,9 @@ function App() {
   };
 
   const handleOpenReleaseUrl = () => {
-    const url = updateInfo?.htmlUrl || `https://github.com/${githubRepo}/releases`;
-    if (window.budgetApp && typeof window.budgetApp.openExternal === 'function') {
-      window.budgetApp.openExternal(url);
-    } else {
-      window.open(url, '_blank');
-    }
+    const repoClean = normalizeGithubRepo(githubRepo);
+    const url = updateInfo?.htmlUrl || `https://github.com/${repoClean}/releases`;
+    openUrlSafely(url);
   };
 
   const assetsRef = useRef(assets);
@@ -3405,78 +3467,194 @@ function App() {
     }
   }, [isStorageInitialized, assets.length, fetchAllTickers]);
 
-  useEffect(() => {
-    window.budgetApp?.ping().then((result) => {
-      if (result?.platform) {
-        setPlatform(result.platform);
-      }
-    });
-  }, []);
+  const applyFullUserData = useCallback((fileData: any, sourceDesc = 'file') => {
+    if (!fileData || typeof fileData !== 'object') return false;
 
-  useEffect(() => {
-    const initDiskData = async () => {
-      if (window.budgetApp && typeof window.budgetApp.loadData === 'function') {
-        try {
-          const fileData = await window.budgetApp.loadData();
-          if (fileData) {
-            if (Array.isArray(fileData.transactions)) setTransactions(fileData.transactions);
-            if (Array.isArray(fileData.transactionOrder)) setTransactionOrder(fileData.transactionOrder);
-            if (Array.isArray(fileData.budgetCategories)) setBudgetCategories(fileData.budgetCategories);
-            if (Array.isArray(fileData.assets)) setAssets(fileData.assets);
-            if (typeof fileData.openingCash === 'number') setStoredOpeningCash(fileData.openingCash);
-            if (typeof fileData.openingNetWorth === 'number') setOpeningNetWorth(fileData.openingNetWorth);
-            if (typeof fileData.openingDate === 'string') setOpeningDate(fileData.openingDate);
-            if (Array.isArray(fileData.assetTransactions)) setAssetTransactions(fileData.assetTransactions);
-            if (Array.isArray(fileData.recurringTransactions)) setRecurringTransactions(fileData.recurringTransactions);
-            if (Array.isArray(fileData.pianiAccumulo)) setPianiAccumulo(fileData.pianiAccumulo);
-            if (Array.isArray(fileData.cashbackRules)) setCashbackRules(fileData.cashbackRules);
-            if (fileData.accountInitialCapitals && typeof fileData.accountInitialCapitals === 'object') setAccountInitialCapitals(fileData.accountInitialCapitals);
-            if (typeof fileData.githubRepo === 'string') setGithubRepo(fileData.githubRepo);
-            if (typeof fileData.autoCheckUpdates === 'boolean') setAutoCheckUpdates(fileData.autoCheckUpdates);
-            
-            setStatusMessage('Dati utente sincronizzati con successo dal disco locale (al sicuro da futuri aggiornamenti dell’app).');
-          }
-        } catch (err) {
-          console.error('Errore durante il caricamento dei dati da disco:', err);
-        }
-      }
-      setIsStorageInitialized(true);
-    };
-    initDiskData();
-  }, []);
+    let restoredCount = 0;
 
-  useEffect(() => {
-    if (!isStorageInitialized) return;
-
-    if (window.budgetApp && typeof window.budgetApp.saveData === 'function') {
-      const dataToSave = {
-        transactions,
-        transactionOrder,
-        budgetCategories,
-        assets,
-        openingCash,
-        openingNetWorth,
-        openingDate,
-        assetTransactions,
-        recurringTransactions,
-        pianiAccumulo,
-        cashbackRules,
-        accountInitialCapitals,
-        githubRepo,
-        autoCheckUpdates,
-      };
-
-      window.budgetApp.saveData(dataToSave).catch((err) => {
-        console.error('Errore durante il salvataggio dei dati su disco:', err);
-      });
+    if (Array.isArray(fileData.transactions)) {
+      setTransactions(fileData.transactions);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(fileData.transactions)); } catch {}
+      restoredCount += fileData.transactions.length;
     }
+    if (Array.isArray(fileData.transactionOrder)) {
+      setTransactionOrder(fileData.transactionOrder);
+      try { localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(fileData.transactionOrder)); } catch {}
+    }
+    if (Array.isArray(fileData.budgetCategories)) {
+      setBudgetCategories(fileData.budgetCategories);
+      try { localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(fileData.budgetCategories)); } catch {}
+    }
+    if (Array.isArray(fileData.assets)) {
+      setAssets(fileData.assets);
+      try { localStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(fileData.assets)); } catch {}
+    }
+    if (typeof fileData.openingCash === 'number') {
+      setStoredOpeningCash(fileData.openingCash);
+      try { localStorage.setItem(OPENING_CASH_STORAGE_KEY, JSON.stringify(fileData.openingCash)); } catch {}
+    }
+    if (typeof fileData.openingNetWorth === 'number') {
+      setOpeningNetWorth(fileData.openingNetWorth);
+      try { localStorage.setItem(OPENING_NET_WORTH_STORAGE_KEY, JSON.stringify(fileData.openingNetWorth)); } catch {}
+    }
+    if (typeof fileData.openingDate === 'string') {
+      setOpeningDate(fileData.openingDate);
+      try { localStorage.setItem(OPENING_DATE_STORAGE_KEY, JSON.stringify(fileData.openingDate)); } catch {}
+    }
+    if (Array.isArray(fileData.assetTransactions)) {
+      setAssetTransactions(fileData.assetTransactions);
+      try { localStorage.setItem(ASSET_TX_STORAGE_KEY, JSON.stringify(fileData.assetTransactions)); } catch {}
+    }
+    if (Array.isArray(fileData.recurringTransactions)) {
+      setRecurringTransactions(fileData.recurringTransactions);
+      try { localStorage.setItem(RECURRING_TX_STORAGE_KEY, JSON.stringify(fileData.recurringTransactions)); } catch {}
+    }
+    if (Array.isArray(fileData.pianiAccumulo)) {
+      setPianiAccumulo(fileData.pianiAccumulo);
+      try { localStorage.setItem(PAC_STORAGE_KEY, JSON.stringify(fileData.pianiAccumulo)); } catch {}
+    }
+    if (Array.isArray(fileData.cashbackRules)) {
+      setCashbackRules(fileData.cashbackRules);
+      try { localStorage.setItem(CASHBACK_RULES_STORAGE_KEY, JSON.stringify(fileData.cashbackRules)); } catch {}
+    }
+    if (Array.isArray(fileData.subscriptions)) {
+      setSubscriptions(fileData.subscriptions);
+      try { localStorage.setItem(SUBSCRIPTION_STORAGE_KEY, JSON.stringify(fileData.subscriptions)); } catch {}
+    }
+    if (fileData.accountInitialCapitals && typeof fileData.accountInitialCapitals === 'object') {
+      setAccountInitialCapitals(fileData.accountInitialCapitals);
+      try { localStorage.setItem(ACCOUNT_INITIAL_CAPITALS_STORAGE_KEY, JSON.stringify(fileData.accountInitialCapitals)); } catch {}
+    }
+    if (typeof fileData.hideNumbers === 'boolean') {
+      setHideNumbers(fileData.hideNumbers);
+      try { localStorage.setItem(HIDE_NUMBERS_STORAGE_KEY, JSON.stringify(fileData.hideNumbers)); } catch {}
+    }
+    if (fileData.theme === 'light' || fileData.theme === 'dark') {
+      setTheme(fileData.theme);
+      try { localStorage.setItem('app-theme', fileData.theme); } catch {}
+    }
+    if (typeof fileData.accentColor === 'string') {
+      setAccentColor(fileData.accentColor);
+      try { localStorage.setItem('budget-ledger-accent-color-v1', fileData.accentColor); } catch {}
+    }
+    if (fileData.bgEffect && ['none', 'stars', 'grid', 'waves', 'dots'].includes(fileData.bgEffect)) {
+      setBgEffect(fileData.bgEffect);
+      try { localStorage.setItem('budget-ledger-bg-effect-v1', fileData.bgEffect); } catch {}
+    }
+    if (typeof fileData.customLogo === 'string') {
+      setCustomLogo(fileData.customLogo);
+      try { localStorage.setItem('budget_custom_brand_logo', fileData.customLogo); } catch {}
+    }
+    if (typeof fileData.githubRepo === 'string' && fileData.githubRepo.trim()) {
+      setGithubRepo(normalizeGithubRepo(fileData.githubRepo));
+    }
+    if (typeof fileData.githubToken === 'string' && fileData.githubToken.trim()) {
+      setGithubToken(fileData.githubToken.trim());
+    }
+    if (typeof fileData.autoCheckUpdates === 'boolean') {
+      setAutoCheckUpdates(fileData.autoCheckUpdates);
+    }
+
+    setStatusMessage(`Dati e configurazione completa ripristinati con successo da ${sourceDesc} (${restoredCount} movimenti riconosciuti).`);
+    return true;
+  }, []);
+
+  const refreshDataFileInfo = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.getDataFileInfo === 'function') {
+      try {
+        const info = await window.budgetApp.getDataFileInfo();
+        setDataFileInfo(info);
+      } catch (err) {
+        console.error('Errore durante il recupero informazioni file dati:', err);
+      }
+    }
+  }, []);
+
+  const handleSelectDataFile = useCallback(async () => {
+    if (!window.budgetApp || typeof window.budgetApp.selectDataFile !== 'function') return;
+    try {
+      const res = await window.budgetApp.selectDataFile();
+      if (res.success && res.data) {
+        applyFullUserData(res.data, res.filePath || 'file selezionato');
+        await refreshDataFileInfo();
+      } else if (res.error) {
+        setStatusMessage(`Errore: ${res.error}`);
+      }
+    } catch (err: any) {
+      setStatusMessage(`Errore selezione file: ${err?.message || 'operazione annullata'}`);
+    }
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  const handleOpenDataFolder = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.openDataFolder === 'function') {
+      await window.budgetApp.openDataFolder();
+    }
+  }, []);
+
+  const userDataJsonInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleImportUserDataJsonClick = useCallback(() => {
+    if (userDataJsonInputRef.current) {
+      userDataJsonInputRef.current.click();
+    }
+  }, []);
+
+  const handleImportUserDataJsonFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      applyFullUserData(parsed, file.name);
+      await refreshDataFileInfo();
+    } catch (err: any) {
+      setStatusMessage(`Impossibile leggere il file: ${err?.message || 'formato non valido'}`);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  const handleExportUserDataJson = useCallback(() => {
+    const dataToExport = {
+      transactions,
+      transactionOrder,
+      budgetCategories,
+      assets,
+      openingCash: storedOpeningCash,
+      openingNetWorth,
+      openingDate,
+      assetTransactions,
+      recurringTransactions,
+      pianiAccumulo,
+      cashbackRules,
+      accountInitialCapitals,
+      subscriptions,
+      theme,
+      accentColor,
+      bgEffect,
+      hideNumbers,
+      customLogo,
+      githubRepo,
+      githubToken,
+      autoCheckUpdates,
+      exportedAt: new Date().toISOString(),
+    };
+    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'user-data.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setStatusMessage('Backup completo esportato con successo in "user-data.json".');
   }, [
-    isStorageInitialized,
     transactions,
     transactionOrder,
     budgetCategories,
     assets,
-    openingCash,
+    storedOpeningCash,
     openingNetWorth,
     openingDate,
     assetTransactions,
@@ -3484,7 +3662,157 @@ function App() {
     pianiAccumulo,
     cashbackRules,
     accountInitialCapitals,
+    subscriptions,
+    theme,
+    accentColor,
+    bgEffect,
+    hideNumbers,
+    customLogo,
     githubRepo,
+    githubToken,
+    autoCheckUpdates,
+  ]);
+
+  useEffect(() => {
+    window.budgetApp?.ping().then((result) => {
+      if (result?.platform) {
+        setPlatform(result.platform);
+      }
+      refreshDataFileInfo();
+    });
+  }, [refreshDataFileInfo]);
+
+  useEffect(() => {
+    const initDiskData = async () => {
+      if (window.budgetApp && typeof window.budgetApp.loadData === 'function') {
+        try {
+          const fileData = await window.budgetApp.loadData();
+          if (fileData) {
+            applyFullUserData(fileData, 'file user-data.json su disco');
+          }
+        } catch (err) {
+          console.error('Errore durante il caricamento dei dati da disco:', err);
+        }
+        await refreshDataFileInfo();
+      }
+      setIsStorageInitialized(true);
+    };
+    initDiskData();
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  // Real-time synchronization when user-data.json changes on disk (external edit, another session, or other apps)
+  useEffect(() => {
+    if (!window.budgetApp || typeof window.budgetApp.onDataUpdatedOnDisk !== 'function') return;
+
+    const unsubscribe = window.budgetApp.onDataUpdatedOnDisk((fileData: any) => {
+      if (!fileData) return;
+      console.log('Ricevuto aggiornamento dati dal file su disco:', fileData);
+      applyFullUserData(fileData, 'file su disco (modificato esternamente)');
+      refreshDataFileInfo();
+    });
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  // Support drag-and-drop of JSON data files directly onto the app window
+  useEffect(() => {
+    const handleGlobalDragOver = (e: DragEvent) => {
+      e.preventDefault();
+    };
+
+    const handleGlobalDrop = async (e: DragEvent) => {
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      if (file.name.toLowerCase().endsWith('.json')) {
+        try {
+          const text = await file.text();
+          const parsed = JSON.parse(text);
+          if (
+            Array.isArray(parsed?.transactions) ||
+            Array.isArray(parsed?.assets) ||
+            Array.isArray(parsed?.budgetCategories) ||
+            parsed?.openingNetWorth !== undefined
+          ) {
+            applyFullUserData(parsed, file.name);
+            refreshDataFileInfo();
+          }
+        } catch (err: any) {
+          console.error('Errore durante la lettura del file trascinato:', err);
+        }
+      }
+    };
+
+    window.addEventListener('dragover', handleGlobalDragOver);
+    window.addEventListener('drop', handleGlobalDrop);
+    return () => {
+      window.removeEventListener('dragover', handleGlobalDragOver);
+      window.removeEventListener('drop', handleGlobalDrop);
+    };
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  useEffect(() => {
+    if (!isStorageInitialized) return;
+
+    const bridge = window.budgetApp;
+    if (bridge && typeof bridge.saveData === 'function') {
+      const timer = setTimeout(() => {
+        const dataToSave = {
+          transactions,
+          transactionOrder,
+          budgetCategories,
+          assets,
+          openingCash: storedOpeningCash,
+          openingNetWorth,
+          openingDate,
+          assetTransactions,
+          recurringTransactions,
+          pianiAccumulo,
+          cashbackRules,
+          accountInitialCapitals,
+          subscriptions,
+          theme,
+          accentColor,
+          bgEffect,
+          hideNumbers,
+          customLogo,
+          githubRepo,
+          githubToken,
+          autoCheckUpdates,
+        };
+
+        bridge.saveData(dataToSave).catch((err) => {
+          console.error('Errore durante il salvataggio dei dati su disco:', err);
+        });
+      }, 700);
+
+      return () => clearTimeout(timer);
+    }
+  }, [
+    isStorageInitialized,
+    transactions,
+    transactionOrder,
+    budgetCategories,
+    assets,
+    storedOpeningCash,
+    openingNetWorth,
+    openingDate,
+    assetTransactions,
+    recurringTransactions,
+    pianiAccumulo,
+    cashbackRules,
+    accountInitialCapitals,
+    subscriptions,
+    theme,
+    accentColor,
+    bgEffect,
+    hideNumbers,
+    customLogo,
+    githubRepo,
+    githubToken,
     autoCheckUpdates,
   ]);
 
@@ -3756,6 +4084,20 @@ function App() {
     return Array.from(accountsSet).sort();
   }, [transactions]);
 
+  const transactionsById = useMemo(() => {
+    const map = new Map<string, Transaction>();
+    for (let i = 0; i < transactions.length; i++) {
+      map.set(transactions[i].id, transactions[i]);
+    }
+    return map;
+  }, [transactions]);
+
+  const selectedTransactionIdsSet = useMemo(() => {
+    return new Set(selectedTransactionIds);
+  }, [selectedTransactionIds]);
+
+  const [transactionPageSize, setTransactionPageSize] = useState<number>(100);
+
   const reimbursementMap = useMemo(() => {
     const map = new Map<string, ReimbursementInfo>();
 
@@ -3979,12 +4321,27 @@ function App() {
     });
   }, [reportRange, transactions]);
 
-  const editingTransaction = transactions.find((transaction) => transaction.id === editingTransactionId) ?? null;
-  const selectedTransactions = transactions.filter((transaction) => selectedTransactionIds.includes(transaction.id));
+  const editingTransaction = useMemo(() => {
+    if (!editingTransactionId) return null;
+    return transactionsById.get(editingTransactionId) ?? null;
+  }, [editingTransactionId, transactionsById]);
+
+  const selectedTransactions = useMemo(() => {
+    return transactions.filter((transaction) => selectedTransactionIdsSet.has(transaction.id));
+  }, [transactions, selectedTransactionIdsSet]);
+
   const selectedTransactionsSum = useMemo(() => {
     return selectedTransactions.reduce((acc, t) => acc + t.amount, 0);
   }, [selectedTransactions]);
-  const allFilteredSelected = filteredTransactions.length > 0 && filteredTransactions.every((transaction) => selectedTransactionIds.includes(transaction.id));
+
+  const allFilteredSelected = useMemo(() => {
+    return filteredTransactions.length > 0 && filteredTransactions.every((transaction) => selectedTransactionIdsSet.has(transaction.id));
+  }, [filteredTransactions, selectedTransactionIdsSet]);
+
+  const visibleTransactions = useMemo(() => {
+    if (filteredTransactions.length <= transactionPageSize) return filteredTransactions;
+    return filteredTransactions.slice(0, transactionPageSize);
+  }, [filteredTransactions, transactionPageSize]);
 
   const filteredSummary = useMemo(() => {
     let totalIncome = 0;
@@ -4200,6 +4557,11 @@ function App() {
   const incomeTotal = incomeTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
   const netFlow = incomeTotal - expenseTotal;
   const cashAvailable = openingCash + netFlow;
+
+  const currentMonthStr = useMemo(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
 
   const {
     projectedEndBalance,
@@ -4474,10 +4836,6 @@ function App() {
       minProjectedBalanceDate: minBalDate,
     };
   }, [cashAvailable, recurringTransactions, pianiAccumulo, assets, scadenziarioHorizon]);
-  const currentMonthStr = useMemo(() => {
-    const today = new Date();
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
 
   const {
     currentMonthTransactions,
@@ -9818,10 +10176,10 @@ function App() {
               <span>Movimento</span>
               <span>Ordine</span>
             </div>
-            {filteredTransactions.map((transaction) => {
+            {visibleTransactions.map((transaction) => {
               const reimbInfo = reimbursementMap.get(transaction.id);
               const linkedExpense = transaction.reimbursesTransactionId
-                ? transactions.find((t) => t.id === transaction.reimbursesTransactionId)
+                ? transactionsById.get(transaction.reimbursesTransactionId) || null
                 : null;
 
               return (
@@ -9829,7 +10187,7 @@ function App() {
                   <label className="transaction-select">
                     <input
                       type="checkbox"
-                      checked={selectedTransactionIds.includes(transaction.id)}
+                      checked={selectedTransactionIdsSet.has(transaction.id)}
                       onChange={() => toggleTransactionSelection(transaction.id)}
                       aria-label={`Seleziona ${transaction.merchant}`}
                     />
@@ -9973,6 +10331,27 @@ function App() {
                 </div>
               );
             })}
+
+            {filteredTransactions.length > visibleTransactions.length && (
+              <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', background: 'var(--overlay-subtle)', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="pill pill-primary"
+                  onClick={() => setTransactionPageSize((prev) => prev + 100)}
+                  style={{ fontSize: '0.82rem', padding: '8px 18px', cursor: 'pointer' }}
+                >
+                  Mostra altri 100 movimenti ({visibleTransactions.length} di {filteredTransactions.length})
+                </button>
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={() => setTransactionPageSize(filteredTransactions.length)}
+                  style={{ fontSize: '0.82rem', padding: '8px 18px', cursor: 'pointer' }}
+                >
+                  Mostra tutti ({filteredTransactions.length})
+                </button>
+              </div>
+            )}
 
             {!filteredTransactions.length ? (
               <div className="empty-state">
@@ -12501,51 +12880,100 @@ function App() {
             </button>
           </div>
 
-          {/* Configurazione Repository GitHub */}
+          {/* Configurazione Repository GitHub & Visibilità */}
           <div
             style={{
               background: 'var(--overlay-subtle)',
               padding: '16px',
               borderRadius: '14px',
               border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
             }}
           >
-            <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: '4px' }}>
-              Repository GitHub da monitorare
-            </span>
-            <span style={{ fontSize: '0.74rem', color: 'var(--muted)', display: 'block', marginBottom: '10px' }}>
-              Specifica il repository pubblico su GitHub contenente le Release e gli installer (DMG, ZIP, EXE).
-            </span>
+            <div>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: '4px' }}>
+                Repository GitHub da monitorare
+              </span>
+              <span style={{ fontSize: '0.74rem', color: 'var(--muted)', display: 'block', marginBottom: '10px', lineHeight: 1.45 }}>
+                L'app rileva automaticamente qualsiasi versione caricata manualmente nelle Release di GitHub (anche se marcata come <em>Pre-release</em>, o se la nuova versione è indicata nel titolo della release o nel nome del file ZIP/DMG).
+              </span>
 
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                type="text"
-                value={githubRepo}
-                onChange={(e) => setGithubRepo(e.target.value)}
-                placeholder="es. proprietario/nome-repository"
-                style={{
-                  flex: 1,
-                  minWidth: '220px',
-                  padding: '8px 12px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border)',
-                  background: 'var(--input-bg)',
-                  color: 'var(--text)',
-                  fontSize: '0.85rem',
-                  fontFamily: 'monospace',
-                }}
-              />
-              <button
-                type="button"
-                className="pill"
-                onClick={() => {
-                  setGithubRepo('Ale410-cpu/App-Budgeting-2');
-                  setStatusMessage('Repository GitHub reimpostato al valore predefinito (Ale410-cpu/App-Budgeting-2).');
-                }}
-                style={{ padding: '8px 14px', fontSize: '0.78rem' }}
-              >
-                Reimposta predefinito
-              </button>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  onBlur={() => setGithubRepo((prev) => normalizeGithubRepo(prev))}
+                  placeholder="es. Ale410-cpu/App-Budgeting-2"
+                  style={{
+                    flex: 1,
+                    minWidth: '220px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={() => {
+                    setGithubRepo('Ale410-cpu/App-Budgeting-2');
+                    setStatusMessage('Repository GitHub reimpostato al valore predefinito (Ale410-cpu/App-Budgeting-2).');
+                  }}
+                  style={{ padding: '8px 14px', fontSize: '0.78rem' }}
+                >
+                  Reimposta predefinito
+                </button>
+              </div>
+            </div>
+
+            {/* Token opzionale per Repository Privata */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: '4px' }}>
+                🔑 Token GitHub opzionale (solo se la repository è Privata)
+              </span>
+              <span style={{ fontSize: '0.73rem', color: 'var(--muted)', display: 'block', marginBottom: '8px', lineHeight: 1.45 }}>
+                • <strong>Se la repository è Pubblica (Consigliato)</strong>: lascia questo campo vuoto, l'app troverà e scaricherà gli aggiornamenti su qualsiasi Mac senza autenticazione.<br />
+                • <strong>Se la repository è Privata</strong>: GitHub blocca l'accesso esterno (errore 404). In questo caso incolla qui un Personal Access Token (PAT) con permesso <code>repo</code>.
+              </span>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input
+                  type="password"
+                  value={githubToken}
+                  onChange={(e) => setGithubToken(e.target.value)}
+                  placeholder="ghp_... (opzionale per repository pubbliche)"
+                  style={{
+                    flex: 1,
+                    minWidth: '220px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text)',
+                    fontSize: '0.83rem',
+                    fontFamily: 'monospace',
+                  }}
+                />
+                {githubToken && (
+                  <button
+                    type="button"
+                    className="pill"
+                    onClick={() => {
+                      setGithubToken('');
+                      setStatusMessage('Token GitHub rimosso.');
+                    }}
+                    style={{ padding: '8px 14px', fontSize: '0.78rem' }}
+                  >
+                    Rimuovi token
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -12587,6 +13015,23 @@ function App() {
               >
                 Apri pagina GitHub Releases ↗
               </button>
+
+              <a
+                href="/api/download-ipa"
+                download={`BudgetApp-${APP_VERSION}.ipa`}
+                className="pill"
+                style={{
+                  padding: '9px 16px',
+                  fontSize: '0.84rem',
+                  cursor: 'pointer',
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                📲 Scarica IPA per iOS (AltStore)
+              </a>
             </div>
 
             {dismissedVersion && (
@@ -12637,6 +13082,136 @@ function App() {
               <span>{manualCheckFeedback}</span>
             </div>
           )}
+        </div>
+      </article>
+
+      {/* Sincronizzazione File Dati macOS Multi-Sessione */}
+      <article className="panel large-panel">
+        <div className="panel-header">
+          <div>
+            <p className="panel-title">Archiviazione & Sincronizzazione File Dati macOS</p>
+            <h4>Posizione sicura e ripristino automatico multi-sessione</h4>
+          </div>
+        </div>
+        <p className="import-hint" style={{ marginBottom: '1.2rem' }}>
+          I tuoi dati finanziari registrati sono memorizzati in modo permanente nella cartella Documenti del Mac in formato standard (<code>user-data.json</code>).
+          L'applicazione monitora questo file e si sincronizza in tempo reale, indipendentemente dal fatto che ci siano altre finestre o app aperte o che provengano da sessioni diverse.
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div
+            style={{
+              background: 'var(--overlay-subtle)',
+              padding: '14px 16px',
+              borderRadius: '14px',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    backgroundColor: '#10b981',
+                    display: 'inline-block',
+                    boxShadow: '0 0 8px #10b981',
+                  }}
+                />
+                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>
+                  File Dati Attivo:
+                </span>
+              </div>
+              {dataFileInfo?.lastModified ? (
+                <span style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
+                  Ultima modifica su disco: {new Date(dataFileInfo.lastModified).toLocaleString('it-IT')}
+                </span>
+              ) : null}
+            </div>
+
+            <code
+              style={{
+                fontSize: '0.78rem',
+                fontFamily: 'monospace',
+                background: 'var(--input-bg)',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border)',
+                color: 'var(--accent)',
+                wordBreak: 'break-all',
+              }}
+            >
+              {dataFileInfo?.filePath || '~/Documents/BudgetingMacApp/user-data.json'}
+            </code>
+
+            {dataFileInfo && (
+              <div style={{ display: 'flex', gap: '16px', fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px', flexWrap: 'wrap' }}>
+                <span>Stato file: <strong style={{ color: dataFileInfo.exists ? '#10b981' : '#f59e0b' }}>{dataFileInfo.exists ? 'Presente e sincronizzato ✓' : 'In attesa di primo salvataggio'}</strong></span>
+                {dataFileInfo.size > 0 && <span>Dimensione: {(dataFileInfo.size / 1024).toFixed(1)} KB</span>}
+                {dataFileInfo.candidates && dataFileInfo.candidates.length > 1 && (
+                  <span title={dataFileInfo.candidates.join('\n')}>
+                    Rilevate {dataFileInfo.candidates.length} posizioni storiche collegate
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="pill pill-primary"
+              onClick={handleImportUserDataJsonClick}
+              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            >
+              📥 Importa file user-data.json
+            </button>
+            <button
+              type="button"
+              className="pill pill-primary"
+              onClick={handleExportUserDataJson}
+              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            >
+              💾 Esporta backup user-data.json
+            </button>
+            <button
+              type="button"
+              className="pill"
+              onClick={handleOpenDataFolder}
+              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            >
+              📁 Mostra cartella nel Finder
+            </button>
+            <button
+              type="button"
+              className="pill"
+              onClick={handleSelectDataFile}
+              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            >
+              🔗 Seleziona / Collega file dati...
+            </button>
+            <button
+              type="button"
+              className="pill"
+              onClick={() => {
+                refreshDataFileInfo();
+                if (window.budgetApp && typeof window.budgetApp.loadData === 'function') {
+                  window.budgetApp.loadData().then((fileData) => {
+                    if (fileData) {
+                      applyFullUserData(fileData, 'file user-data.json su disco');
+                    }
+                  });
+                }
+              }}
+              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+            >
+              🔄 Ricarica dati dal file
+            </button>
+          </div>
         </div>
       </article>
 
@@ -13162,8 +13737,14 @@ function App() {
             )}
             {activeSection === 'impostazioni' && (
               <>
+                <button className="pill" type="button" onClick={handleImportUserDataJsonClick} title="Importa il file user-data.json salvato per ripristinare all'istante l'intera applicazione">
+                  📥 Importa user-data.json
+                </button>
+                <button className="pill" type="button" onClick={handleExportUserDataJson} title="Scarica una copia completa di backup di tutti i dati registrati">
+                  💾 Salva user-data.json
+                </button>
                 <button className="pill" type="button" onClick={handleImportClick} title="Importa file Excel (.xlsx), Apple Numbers (.numbers), PDF estratti conto o CSV">
-                  📥 Importa dati (Excel, Numbers, PDF)
+                  Importa Excel/PDF
                 </button>
                 <button className="pill pill-primary" type="button" onClick={handleExportExcel}>
                   Esporta Excel
@@ -13198,6 +13779,13 @@ function App() {
           type="file"
           accept=".xlsx,.xls,.xlsm,.csv,.tsv,.txt,.numbers,.pdf,application/pdf,application/vnd.apple.numbers,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
           onChange={handleImportFile}
+        />
+        <input
+          ref={userDataJsonInputRef}
+          className="hidden-file-input"
+          type="file"
+          accept=".json,application/json"
+          onChange={handleImportUserDataJsonFile}
         />
 
         <ImportDataModal
