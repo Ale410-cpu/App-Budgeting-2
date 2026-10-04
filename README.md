@@ -1,6 +1,6 @@
 # Registro budget
 
-Spazio di lavoro desktop per macOS, Windows e Linux costruito con Electron, React, Vite e TypeScript.
+Spazio di lavoro desktop per macOS costruito con Electron, React, Vite e TypeScript.
 
 ## Cosa include
 
