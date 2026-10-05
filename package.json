@@ -72,7 +72,8 @@
       "dist/**/*",
       "electron/**/*",
       "build/icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*"
     ],
     "mac": {
       "category": "public.app-category.finance",
