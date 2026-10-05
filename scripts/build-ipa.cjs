@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const vm = require('vm');
 const { execSync } = require('child_process');
 const JSZip = require('jszip');
 
@@ -24,10 +25,12 @@ function encodeULEB128(value) {
 /**
  * Generates a valid 64-bit ARM64 iOS Mach-O executable (MH_EXECUTE) that:
  * 1. Passes all AltStore / AltSign / ldid / Sideloadly / iOS installd Mach-O & __LINKEDIT checks.
- * 2. Links UIKit, WebKit, Foundation, libobjc.A.dylib, and libSystem.B.dylib.
- * 3. Registers BudgetAppDelegate (with window/setWindow: and application:didFinishLaunchingWithOptions:),
- *    initializes a full-screen UIWindow + UIViewController + WKWebView with UIScreen.mainScreen.bounds,
- *    enables allowFileAccessFromFileURLs, and loads index.html from NSBundle.mainBundle.
+ * 2. Explicitly binds _OBJC_CLASS_$_WKWebView and _OBJC_CLASS_$_WKWebViewConfiguration from WebKit.framework
+ *    so dyld4 on iOS 15/16/17/18 is guaranteed to load and initialize WebKit at startup.
+ * 3. Creates WKWebViewConfiguration with allowFileAccessFromFileURLs = YES BEFORE initializing WKWebView
+ *    via -[WKWebView initWithFrame:configuration:].
+ * 4. Reads index.html in-process via +[NSString stringWithContentsOfURL:encoding:error:] and loads it
+ *    directly into WKWebView via -[WKWebView loadHTMLString:baseURL:] (with fallback to loadFileURL:allowingReadAccessToURL:).
  */
 function createArm64IosMachOBinary() {
   // Layout constants (16KB page aligned for iOS ARM64)
@@ -46,13 +49,13 @@ function createArm64IosMachOBinary() {
   const ALLOC_INIT_HELPER_OFFSET = 0x1200; // _alloc_init_helper (0x1200 .. 0x1280)
   const WIN_GETTER_OFFSET = 0x1280;        // -[BudgetAppDelegate window]
   const WIN_SETTER_OFFSET = 0x12A0;        // -[BudgetAppDelegate setWindow:]
-  const DID_FINISH_OFFSET = 0x12C0;        // -[BudgetAppDelegate application:didFinishLaunchingWithOptions:] (0x12C0 .. 0x1A00)
-  const CSTRING_OFFSET = 0x1A00;           // __TEXT,__cstring (0x1A00 .. 0x2400)
+  const DID_FINISH_OFFSET = 0x12C0;        // -[BudgetAppDelegate application:didFinishLaunchingWithOptions:] (0x12C0 .. 0x1B00)
+  const CSTRING_OFFSET = 0x1B00;           // __TEXT,__cstring (0x1B00 .. 0x2600)
 
   const GOT_OFFSET = 0x4000;       // __DATA,__got
   const DATA_VARS_OFFSET = 0x4080; // __DATA,__data (global strong UIWindow* reference)
 
-  // Strings in __TEXT,__cstring (each placed at 64-byte intervals: 0x1800 + i * 0x40)
+  // Strings in __TEXT,__cstring (each placed at 64-byte intervals)
   const cstrings = [
     'UIResponder',                                // 0
     'BudgetAppDelegate',                          // 1
@@ -90,6 +93,10 @@ function createArm64IosMachOBinary() {
     'bounds',                                     // 33
     'initWithFrame:',                             // 34
     'setAutoresizingMask:',                       // 35
+    'WKWebViewConfiguration',                     // 36
+    'initWithFrame:configuration:',               // 37
+    'stringWithContentsOfURL:encoding:error:',    // 38
+    'loadHTMLString:baseURL:',                    // 39
   ];
 
   const strOff = (idx) => CSTRING_OFFSET + idx * 0x40;
@@ -102,15 +109,17 @@ function createArm64IosMachOBinary() {
   // 4 = /System/Library/Frameworks/UIKit.framework/UIKit
   // 5 = /System/Library/Frameworks/WebKit.framework/WebKit
   const importedSymbols = [
-    { name: '_objc_getClass', dylibOrdinal: 2 },            // GOT[0]
-    { name: '_sel_registerName', dylibOrdinal: 2 },         // GOT[1]
-    { name: '_objc_msgSend', dylibOrdinal: 2 },             // GOT[2]
-    { name: '_objc_allocateClassPair', dylibOrdinal: 2 },   // GOT[3]
-    { name: '_class_addMethod', dylibOrdinal: 2 },          // GOT[4]
-    { name: '_objc_registerClassPair', dylibOrdinal: 2 },   // GOT[5]
-    { name: '_UIApplicationMain', dylibOrdinal: 4 },        // GOT[6]
-    { name: '_objc_autoreleasePoolPush', dylibOrdinal: 2 }, // GOT[7]
-    { name: '_NSLog', dylibOrdinal: 3 },                    // GOT[8]
+    { name: '_objc_getClass', dylibOrdinal: 2 },                  // GOT[0]
+    { name: '_sel_registerName', dylibOrdinal: 2 },               // GOT[1]
+    { name: '_objc_msgSend', dylibOrdinal: 2 },                   // GOT[2]
+    { name: '_objc_allocateClassPair', dylibOrdinal: 2 },         // GOT[3]
+    { name: '_class_addMethod', dylibOrdinal: 2 },                // GOT[4]
+    { name: '_objc_registerClassPair', dylibOrdinal: 2 },         // GOT[5]
+    { name: '_UIApplicationMain', dylibOrdinal: 4 },              // GOT[6]
+    { name: '_objc_autoreleasePoolPush', dylibOrdinal: 2 },       // GOT[7]
+    { name: '_NSLog', dylibOrdinal: 3 },                          // GOT[8]
+    { name: '_OBJC_CLASS_$_WKWebView', dylibOrdinal: 5 },         // GOT[9]
+    { name: '_OBJC_CLASS_$_WKWebViewConfiguration', dylibOrdinal: 5 }, // GOT[10]
   ];
 
   // ARM64 instruction encoders
@@ -152,6 +161,10 @@ function createArm64IosMachOBinary() {
       const relWords = ((targetOff - currentPcOff) >> 2) & 0x7ffff;
       return (0xb4000000 | (relWords << 5) | (rt & 0x1f)) >>> 0;
     },
+    cbnz64: (rt, currentPcOff, targetOff) => {
+      const relWords = ((targetOff - currentPcOff) >> 2) & 0x7ffff;
+      return (0xb5000000 | (relWords << 5) | (rt & 0x1f)) >>> 0;
+    },
     blr: (rn) => (0xd63f0000 | (rn << 5)) >>> 0,
     bl: (currentPcOff, targetOff) => {
       const rel = targetOff - currentPcOff;
@@ -179,6 +192,12 @@ function createArm64IosMachOBinary() {
       },
       emit: (insn) => {
         textSeg.writeUInt32LE(insn >>> 0, pc);
+        pc += 4;
+      },
+      emitLoadGot: (rd, gotIndex) => {
+        textSeg.writeUInt32LE(arm64.adr(rd, pc, GOT_OFFSET), pc);
+        pc += 4;
+        textSeg.writeUInt32LE(arm64.ldrUimm64(rd, rd, gotIndex * 8), pc);
         pc += 4;
       },
       emitCallGot: (gotIndex) => {
@@ -213,7 +232,7 @@ function createArm64IosMachOBinary() {
     };
   }
 
-  // 1. Emit _main at 0x1000 .. 0x10C0
+  // 1. Emit _main at 0x1000 .. 0x1180
   {
     const e = createEmitter(CODE_OFFSET, NSSTR_HELPER_OFFSET, '_main');
     e.emit(arm64.stpPreSp(29, 30, -48));
@@ -286,7 +305,7 @@ function createArm64IosMachOBinary() {
     e.finish();
   }
 
-  // 2. Emit _nsstr_helper at 0x10C0 .. 0x1120
+  // 2. Emit _nsstr_helper at 0x1180 .. 0x1200
   {
     const e = createEmitter(NSSTR_HELPER_OFFSET, ALLOC_INIT_HELPER_OFFSET, '_nsstr_helper');
     e.emit(arm64.stpPreSp(29, 30, -32));
@@ -303,7 +322,7 @@ function createArm64IosMachOBinary() {
     e.finish();
   }
 
-  // 3. Emit _alloc_init_helper at 0x1120 .. 0x1190
+  // 3. Emit _alloc_init_helper at 0x1200 .. 0x1280
   {
     const e = createEmitter(ALLOC_INIT_HELPER_OFFSET, WIN_GETTER_OFFSET, '_alloc_init_helper');
     e.emit(arm64.stpPreSp(29, 30, -32));
@@ -320,7 +339,7 @@ function createArm64IosMachOBinary() {
     e.finish();
   }
 
-  // 4. Emit -[BudgetAppDelegate window] at 0x1190 .. 0x11B0
+  // 4. Emit -[BudgetAppDelegate window] at 0x1280 .. 0x12A0
   {
     const e = createEmitter(WIN_GETTER_OFFSET, WIN_SETTER_OFFSET, '_win_getter');
     e.emitAdr(16, DATA_VARS_OFFSET);
@@ -329,7 +348,7 @@ function createArm64IosMachOBinary() {
     e.finish();
   }
 
-  // 5. Emit -[BudgetAppDelegate setWindow:] at 0x11B0 .. 0x11D0
+  // 5. Emit -[BudgetAppDelegate setWindow:] at 0x12A0 .. 0x12C0
   {
     const e = createEmitter(WIN_SETTER_OFFSET, DID_FINISH_OFFSET, '_win_setter');
     e.emitAdr(16, DATA_VARS_OFFSET);
@@ -338,7 +357,7 @@ function createArm64IosMachOBinary() {
     e.finish();
   }
 
-  // 6. Emit -[BudgetAppDelegate application:didFinishLaunchingWithOptions:] at 0x11D0 .. 0x1800
+  // 6. Emit -[BudgetAppDelegate application:didFinishLaunchingWithOptions:] at 0x12C0 .. 0x1B00
   {
     const e = createEmitter(DID_FINISH_OFFSET, CSTRING_OFFSET, '_didFinishLaunching');
     e.emit(arm64.stpPreSp(29, 30, -96));
@@ -385,43 +404,52 @@ function createArm64IosMachOBinary() {
     e.emitBl(ALLOC_INIT_HELPER_OFFSET);
     e.emit(arm64.movReg(20, 0)); // X20 = vc
 
-    // Allocate WKWebView and initWithFrame:[mainScreen bounds]
-    e.emitAdr(0, strOff(10)); // "WKWebView"
+    // Create WKWebViewConfiguration *config (X22) using bound GOT[10] (_OBJC_CLASS_$_WKWebViewConfiguration)
+    e.emitLoadGot(22, 10); // X22 = WKWebViewConfiguration Class
+    e.emitMsgSend(22, 7);  // [WKWebViewConfiguration alloc]
+    e.emit(arm64.movReg(22, 0));
+    e.emitMsgSend(22, 8);  // [config init]
+    e.emit(arm64.movReg(22, 0)); // X22 = config
+
+    // Enable allowFileAccessFromFileURLs on [config preferences] BEFORE creating WKWebView
+    e.emitMsgSend(22, 22); // [config preferences]
+    e.emit(arm64.movReg(23, 0)); // X23 = preferences
+
+    e.emitAdr(0, strOff(23)); // "NSNumber"
     e.emitCallGot(0);
-    e.emit(arm64.movReg(21, 0));
+    e.emit(arm64.movReg(24, 0));
+    e.emit(arm64.movz(27, 1)); // YES = 1
+    e.emitMsgSend(24, 24, 27); // [NSNumber numberWithBool:YES]
+    e.emit(arm64.movReg(24, 0)); // X24 = @YES
+
+    e.emitAdr(0, strOff(26)); // "allowFileAccessFromFileURLs"
+    e.emitBl(NSSTR_HELPER_OFFSET);
+    e.emit(arm64.movReg(27, 0)); // X27 = @"allowFileAccessFromFileURLs"
+
+    e.emitMsgSend(23, 25, 24, 27); // [preferences setValue:@YES forKey:@"allowFileAccessFromFileURLs"]
+
+    // Allocate WKWebView using bound GOT[9] (_OBJC_CLASS_$_WKWebView) and call initWithFrame:bounds configuration:config
+    e.emitLoadGot(21, 9); // X21 = WKWebView Class
     e.emitMsgSend(21, 7); // [WKWebView alloc]
     e.emit(arm64.movReg(21, 0)); // X21 = allocated WKWebView
 
+    // X27 = sel_registerName("initWithFrame:configuration:")
+    e.emitAdr(0, strOff(37)); // "initWithFrame:configuration:"
+    e.emitCallGot(1);
+    e.emit(arm64.movReg(27, 0)); // X27 = @selector(initWithFrame:configuration:)
+
     // Call [mainScreen bounds] -> sets D0, D1, D2, D3!
     e.emitMsgSend(25, 33); // [mainScreen bounds]
-    // Immediately call [webView initWithFrame:bounds]
+    // Immediately call [webView initWithFrame:bounds configuration:config] (X2 = config, D0..D3 = bounds)
     e.emit(arm64.movReg(0, 21));
-    e.emit(arm64.movReg(1, 26));
+    e.emit(arm64.movReg(1, 27));
+    e.emit(arm64.movReg(2, 22));
     e.emitCallGot(2);
     e.emit(arm64.movReg(21, 0)); // X21 = initialized WKWebView*
 
     // [webView setAutoresizingMask:18] (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight)
     e.emit(arm64.movz(27, 18));
     e.emitMsgSend(21, 35, 27);
-
-    // Enable allowFileAccessFromFileURLs on webView.configuration.preferences
-    e.emitMsgSend(21, 21); // [webView configuration]
-    e.emit(arm64.movReg(22, 0));
-    e.emitMsgSend(22, 22); // [config preferences]
-    e.emit(arm64.movReg(22, 0)); // X22 = preferences
-
-    e.emitAdr(0, strOff(23)); // "NSNumber"
-    e.emitCallGot(0);
-    e.emit(arm64.movReg(23, 0));
-    e.emit(arm64.movz(27, 1)); // YES = 1
-    e.emitMsgSend(23, 24, 27); // [NSNumber numberWithBool:YES]
-    e.emit(arm64.movReg(23, 0)); // X23 = @YES
-
-    e.emitAdr(0, strOff(26)); // "allowFileAccessFromFileURLs"
-    e.emitBl(NSSTR_HELPER_OFFSET);
-    e.emit(arm64.movReg(24, 0)); // X24 = @"allowFileAccessFromFileURLs"
-
-    e.emitMsgSend(22, 25, 23, 24); // [preferences setValue:@YES forKey:@"allowFileAccessFromFileURLs"]
 
     // [vc setView:webView]
     e.emitMsgSend(20, 11, 21);
@@ -448,18 +476,50 @@ function createArm64IosMachOBinary() {
 
     e.emitAdr(0, strOff(17)); // "html"
     e.emitBl(NSSTR_HELPER_OFFSET);
-    e.emit(arm64.movReg(25, 0)); // X25 = @"html" (stored in callee-saved X25!)
+    e.emit(arm64.movReg(25, 0)); // X25 = @"html"
 
     // X24 = [mainBundle URLForResource:@"index" withExtension:@"html"]
     e.emitMsgSend(22, 15, 24, 25);
     e.emit(arm64.movReg(24, 0)); // X24 = fileUrl
 
-    // Guard against nil fileUrl before calling [webView loadFileURL:fileUrl allowingReadAccessToURL:bundleURL]
-    const cbzPc = e.getPc();
+    // Guard against nil fileUrl
+    const cbzFileUrlPc = e.getPc();
     e.emit(0); // placeholder for CBZ X24, skipLoad
-    e.emitMsgSend(21, 18, 24, 23); // [webView loadFileURL:fileUrl allowingReadAccessToURL:bundleURL]
+
+    // Read index.html into NSString in-process: [NSString stringWithContentsOfURL:fileUrl encoding:4 error:0]
+    e.emitAdr(0, strOff(4)); // "NSString"
+    e.emitCallGot(0);
+    e.emit(arm64.movReg(25, 0)); // X25 = NSString Class
+
+    e.emitAdr(0, strOff(38)); // "stringWithContentsOfURL:encoding:error:"
+    e.emitCallGot(1);
+    e.emit(arm64.movReg(1, 0));  // X1 = SEL
+    e.emit(arm64.movReg(0, 25)); // X0 = NSString Class
+    e.emit(arm64.movReg(2, 24)); // X2 = fileUrl
+    e.emit(arm64.movz(3, 4));    // X3 = 4 (NSUTF8StringEncoding)
+    e.emit(arm64.movz(4, 0));    // X4 = NULL (error)
+    e.emitCallGot(2);            // objc_msgSend
+    e.emit(arm64.movReg(25, 0)); // X25 = htmlString (NSString*)
+
+    // If htmlString is nil, jump to fallback loadFileURL:allowingReadAccessToURL:
+    const cbzHtmlPc = e.getPc();
+    e.emit(0); // placeholder for CBZ X25, fallbackFileUrl
+
+    // Primary load: [webView loadHTMLString:htmlString baseURL:bundleURL]
+    e.emitMsgSend(21, 39, 25, 23);
+
+    // Also allow jump over fallback when htmlString succeeded
+    const cbnzDonePc = e.getPc();
+    e.emit(0); // placeholder for CBNZ X25, skipLoad
+
+    const fallbackFileUrlPc = e.getPc();
+    // Fallback load: [webView loadFileURL:fileUrl allowingReadAccessToURL:bundleURL]
+    e.emitMsgSend(21, 18, 24, 23);
+
     const skipLoadPc = e.getPc();
-    textSeg.writeUInt32LE(arm64.cbz64(24, cbzPc, skipLoadPc), cbzPc);
+    textSeg.writeUInt32LE(arm64.cbz64(24, cbzFileUrlPc, skipLoadPc), cbzFileUrlPc);
+    textSeg.writeUInt32LE(arm64.cbz64(25, cbzHtmlPc, fallbackFileUrlPc), cbzHtmlPc);
+    textSeg.writeUInt32LE(arm64.cbnz64(25, cbnzDonePc, skipLoadPc), cbnzDonePc);
 
     // return YES (1)
     e.emit(arm64.movz(0, 1));
@@ -771,7 +831,7 @@ function createArm64IosMachOBinary() {
     const b = Buffer.alloc(24, 0);
     b.writeUInt32LE(0x1b, 0);
     b.writeUInt32LE(24, 4);
-    const uuid = crypto.createHash('md5').update('BudgetApp-iOS-ARM64-MachO-v2').digest();
+    const uuid = crypto.createHash('md5').update('BudgetApp-iOS-ARM64-MachO-v3').digest();
     uuid.copy(b, 8);
     loadCommands.push(b);
   }
@@ -968,9 +1028,12 @@ function generateValidInfoPlist(appName, version) {
 }
 
 /**
- * Prepares a self-contained index.html for iOS WKWebView:
+ * Prepares a 100% self-contained index.html for iOS WKWebView:
+ * - Removes restrictive CSP meta tags that can block local file:// or loadHTMLString execution
+ * - Injects a localStorage/sessionStorage safeguard polyfill so file:// origins never throw SecurityError
  * - Inlines CSS inside <head>
- * - Places inlined JS bundle at the END of <body> AFTER <div id="root"></div> so #root exists when React mounts!
+ * - Transforms import.meta.url / import.meta in the Vite bundle into classic JS and validates with vm.Script
+ * - Places the validated JS bundle at the END of <body> AFTER <div id="root">
  */
 function prepareIosSelfContainedHtml(distDir) {
   const indexHtmlPath = path.join(distDir, 'index.html');
@@ -978,11 +1041,54 @@ function prepareIosSelfContainedHtml(distDir) {
 
   let html = fs.readFileSync(indexHtmlPath, 'utf-8');
 
+  // Remove restrictive Content-Security-Policy meta tag on local iOS WKWebView bundle
+  html = html.replace(/<meta[^>]+http-equiv=["']Content-Security-Policy["'][^>]*>/gi, '');
+
   // Ensure viewport has viewport-fit=cover for iOS notch / Dynamic Island
   html = html.replace(
     /<meta\s+name="viewport"\s+content="[^"]*"\s*\/?>/i,
     '<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />'
   );
+
+  // Inject iOS WKWebView storage & environment safeguard at top of <head>
+  const iosBootstrapPolyfill = `<script>
+(function() {
+  try {
+    var k = '__budget_ios_test__';
+    window.localStorage.setItem(k, '1');
+    window.localStorage.removeItem(k);
+  } catch (e) {
+    var mem = {};
+    try {
+      if (window.name && window.name.indexOf('__BUDGET_IOS__:') === 0) {
+        mem = JSON.parse(window.name.slice(15)) || {};
+      }
+    } catch (_) {}
+    var save = function() {
+      try { window.name = '__BUDGET_IOS__:' + JSON.stringify(mem); } catch (_) {}
+    };
+    var store = {
+      getItem: function(key) { return Object.prototype.hasOwnProperty.call(mem, key) ? String(mem[key]) : null; },
+      setItem: function(key, val) { mem[key] = String(val); save(); },
+      removeItem: function(key) { delete mem[key]; save(); },
+      clear: function() { mem = {}; save(); },
+      key: function(i) { var keys = Object.keys(mem); return keys[i] || null; },
+      get length() { return Object.keys(mem).length; }
+    };
+    try { Object.defineProperty(window, 'localStorage', { value: store, configurable: true }); } catch (_) {}
+    try { Object.defineProperty(window, 'sessionStorage', { value: store, configurable: true }); } catch (_) {}
+  }
+  window.addEventListener('error', function(ev) {
+    var el = document.getElementById('ios-boot-status');
+    if (el) {
+      el.style.color = '#f87171';
+      el.textContent = 'Errore avvio: ' + (ev && ev.message ? ev.message : 'errore sconosciuto');
+    }
+  });
+})();
+</script>`;
+
+  html = html.replace('<head>', () => `<head>\n${iosBootstrapPolyfill}`);
 
   // Inline local CSS files
   html = html.replace(/<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"[^>]*>/gi, (fullMatch, href) => {
@@ -995,19 +1101,44 @@ function prepareIosSelfContainedHtml(distDir) {
     return fullMatch.replace(/\scrossorigin(=["'][^"']*["'])?/gi, '');
   });
 
-  // Extract local JS scripts from <head> and place them right before </body> so #root is already in DOM
+  // Extract local JS scripts from <head>, convert import.meta for classic script execution, and verify syntax
   const inlineScripts = [];
   html = html.replace(/<script[^>]+src="([^"]+)"[^>]*><\/script>/gi, (fullMatch, src) => {
     const cleanRel = src.replace(/^\.\//, '').replace(/^\//, '');
     const jsPath = path.join(distDir, cleanRel);
     if (fs.existsSync(jsPath)) {
-      const jsContent = fs.readFileSync(jsPath, 'utf-8');
+      let jsContent = fs.readFileSync(jsPath, 'utf-8');
+      jsContent = jsContent
+        .replace(
+          /import\.meta\.url/g,
+          '(window.location.href&&window.location.href.indexOf("file:")===0?window.location.href:"file:///index.html")'
+        )
+        .replace(
+          /import\.meta/g,
+          '({url:(window.location.href&&window.location.href.indexOf("file:")===0?window.location.href:"file:///index.html"),env:{}})'
+        );
+
+      // Verify at build time that the transformed JS has zero syntax errors as a classic script
+      new vm.Script(jsContent);
+
       const safeJs = jsContent.replace(/<\/script>/gi, '<\\/script>');
       inlineScripts.push(`<script>${safeJs}</script>`);
       return '';
     }
     return fullMatch.replace(/\scrossorigin(=["'][^"']*["'])?/gi, '');
   });
+
+  // Add visible launch splash inside #root so screen is never black while JS parses
+  html = html.replace(
+    '<div id="root"></div>',
+    () => `<div id="root">
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#08111f;color:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:24px;text-align:center;">
+        <div style="width:60px;height:60px;border-radius:18px;background:linear-gradient(135deg,#0ea5e9,#38bdf8);display:flex;align-items:center;justify-content:center;font-size:30px;margin-bottom:16px;box-shadow:0 10px 25px rgba(14,165,233,0.35);">📊</div>
+        <div style="font-size:19px;font-weight:700;margin-bottom:6px;">Budget Ledger</div>
+        <div id="ios-boot-status" style="font-size:13px;color:#94a3b8;">Caricamento interfaccia...</div>
+      </div>
+    </div>`
+  );
 
   if (inlineScripts.length > 0) {
     html = html.replace('</body>', () => `${inlineScripts.join('\n')}\n</body>`);
@@ -1030,7 +1161,7 @@ async function buildIpa() {
   } catch {}
 
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf-8'));
-  const version = pkg.version || '0.3.3';
+  const version = pkg.version || '0.3.5';
   const appName = 'BudgetApp';
   const outDir = path.join(__dirname, '../dist-ios');
 

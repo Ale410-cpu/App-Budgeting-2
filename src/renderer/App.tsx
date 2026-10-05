@@ -2710,23 +2710,35 @@ function BudgetCategoryEditor({
 
 function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('app-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
+    try {
+      const saved = localStorage.getItem('app-theme');
+      if (saved === 'light' || saved === 'dark') return saved;
+    } catch {}
     return 'dark';
   });
 
   const [accentColor, setAccentColor] = useState<string>(() => {
-    const saved = localStorage.getItem('budget-ledger-accent-color-v1');
-    return saved || '';
+    try {
+      const saved = localStorage.getItem('budget-ledger-accent-color-v1');
+      return saved || '';
+    } catch {
+      return '';
+    }
   });
 
   const [bgEffect, setBgEffect] = useState<'none' | 'stars' | 'grid' | 'waves' | 'dots'>(() => {
-    const saved = localStorage.getItem('budget-ledger-bg-effect-v1');
-    return (saved as any) || 'none';
+    try {
+      const saved = localStorage.getItem('budget-ledger-bg-effect-v1');
+      return (saved as any) || 'none';
+    } catch {
+      return 'none';
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem('app-theme', theme);
+    try {
+      localStorage.setItem('app-theme', theme);
+    } catch {}
     if (theme === 'light') {
       document.documentElement.classList.add('light-theme');
     } else {
@@ -2736,19 +2748,25 @@ function App() {
 
   useEffect(() => {
     if (accentColor) {
-      localStorage.setItem('budget-ledger-accent-color-v1', accentColor);
+      try {
+        localStorage.setItem('budget-ledger-accent-color-v1', accentColor);
+      } catch {}
       document.documentElement.style.setProperty('--accent', accentColor);
       const strongColor = adjustColorBrightness(accentColor, theme === 'light' ? 25 : -25);
       document.documentElement.style.setProperty('--accent-strong', strongColor);
     } else {
-      localStorage.removeItem('budget-ledger-accent-color-v1');
+      try {
+        localStorage.removeItem('budget-ledger-accent-color-v1');
+      } catch {}
       document.documentElement.style.removeProperty('--accent');
       document.documentElement.style.removeProperty('--accent-strong');
     }
   }, [accentColor, theme]);
 
   useEffect(() => {
-    localStorage.setItem('budget-ledger-bg-effect-v1', bgEffect);
+    try {
+      localStorage.setItem('budget-ledger-bg-effect-v1', bgEffect);
+    } catch {}
   }, [bgEffect]);
 
   const [platform, setPlatform] = useState('macOS');
@@ -2904,7 +2922,7 @@ function App() {
       let result: UpdateCheckResult;
       if (window.budgetApp && typeof window.budgetApp.checkForUpdates === 'function') {
         result = await window.budgetApp.checkForUpdates(repo, token);
-      } else {
+      } else if (window.location.protocol !== 'file:') {
         const query = new URLSearchParams({ repo, _t: String(Date.now()) });
         if (token) query.set('token', token);
         const response = await fetch(`/api/check-update?${query.toString()}`, {
@@ -2914,6 +2932,34 @@ function App() {
           throw new Error(`Server ha risposto con codice ${response.status}`);
         }
         result = await response.json();
+      } else {
+        // Direct GitHub API check for standalone iOS WKWebView (file://)
+        const headers: Record<string, string> = {
+          Accept: 'application/vnd.github.v3+json',
+        };
+        if (token) headers['Authorization'] = `token ${token}`;
+        const ghRes = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20&_t=${Date.now()}`, {
+          headers,
+        });
+        if (!ghRes.ok) {
+          result = {
+            updateAvailable: false,
+            currentVersion: APP_VERSION,
+            latestVersion: APP_VERSION,
+          };
+        } else {
+          const list = await ghRes.json();
+          const first = Array.isArray(list) && list.length > 0 ? list[0] : null;
+          const latestVer = String(first?.tag_name || APP_VERSION).replace(/^v/i, '');
+          result = {
+            updateAvailable: false,
+            currentVersion: APP_VERSION,
+            latestVersion: latestVer || APP_VERSION,
+            releaseName: first?.name,
+            releaseNotes: first?.body,
+            htmlUrl: first?.html_url || `https://github.com/${repo}/releases`,
+          };
+        }
       }
 
       setUpdateInfo(result);

@@ -960,7 +960,7 @@ ipcMain.handle('app:check-for-updates', async (event, customRepo, customToken) =
       ? repoMatch[1]
       : defaultRepo;
 
-  const currentVersion = app.getVersion() || '0.3.4';
+  const currentVersion = app.getVersion() || '0.3.5';
   const token = (typeof customToken === 'string' && customToken.trim()) || getStoredGithubToken();
 
   try {
