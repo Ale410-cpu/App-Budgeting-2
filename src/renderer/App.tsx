@@ -12948,7 +12948,7 @@ function App() {
                   type="password"
                   value={githubToken}
                   onChange={(e) => setGithubToken(e.target.value)}
-                  placeholder="ghp_... (opzionale per repository pubbliche)"
+                  placeholder=""
                   style={{
                     flex: 1,
                     minWidth: '220px',

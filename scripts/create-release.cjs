@@ -36,7 +36,7 @@ async function createGitHubRelease() {
     console.error('❌ Errore: Variabile d\'ambiente GITHUB_TOKEN non trovata.');
     console.error('   Per pubblicare automaticamente una release su GitHub, è necessario un Personal Access Token (PAT) con permessi "repo".');
     console.error('   Esempio di utilizzo:');
-    console.error('   GITHUB_TOKEN=ghp_tuoToken npm run release:github');
+    console.error('   ');
     process.exit(1);
   }
 
