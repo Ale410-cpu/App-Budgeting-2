@@ -31,6 +31,13 @@ export interface UpdateProgress {
 
 export interface DataFileInfo {
   filePath: string;
+  fileName?: string;
+  folderPath?: string;
+  displayLocation?: string;
+  isICloud?: boolean;
+  isCustomPrimary?: boolean;
+  iCloudAvailable?: boolean;
+  iCloudDefaultPath?: string;
   exists: boolean;
   size: number;
   lastModified: number;
@@ -42,16 +49,36 @@ export interface BudgetAppBridge {
     ok: boolean;
     version: string;
     platform: string;
+    dataFilePath?: string;
   }>;
   platform: string;
-  saveData(data: any): Promise<{ success: boolean; error?: string }>;
+  saveData(data: any): Promise<{ success: boolean; filePath?: string; error?: string }>;
   loadData(): Promise<any>;
   getDataFileInfo(): Promise<DataFileInfo>;
   selectDataFile(): Promise<{
     success: boolean;
     data?: any;
     filePath?: string;
+    displayLocation?: string;
+    isICloud?: boolean;
     canceled?: boolean;
+    error?: string;
+  }>;
+  chooseSaveDataLocation(currentData?: any, startInICloud?: boolean): Promise<{
+    success: boolean;
+    data?: any;
+    filePath?: string;
+    displayLocation?: string;
+    isICloud?: boolean;
+    canceled?: boolean;
+    error?: string;
+  }>;
+  useICloudDataLocation(currentData?: any): Promise<{
+    success: boolean;
+    data?: any;
+    filePath?: string;
+    displayLocation?: string;
+    isICloud?: boolean;
     error?: string;
   }>;
   openDataFolder(): Promise<boolean>;
@@ -68,6 +95,12 @@ export interface BudgetAppBridge {
     filePath?: string;
     error?: string;
   }>;
+  sendNotification?: (payload: {
+    title: string;
+    body?: string;
+    icon?: string;
+    silent?: boolean;
+  }) => Promise<{ success: boolean; error?: string; reason?: string }>;
   openExternal(url: string): Promise<boolean>;
   onUpdateProgress(callback: (progress: UpdateProgress) => void): () => void;
   onDataUpdatedOnDisk(callback: (payload: any) => void): () => void;

@@ -369,7 +369,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
       </section>
 
       {/* Main Grid: Form on Left, List on Right */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 460px) 1fr', gap: '2rem', alignItems: 'start' }}>
+      <div className="responsive-split-grid">
         {/* Left Panel: Form */}
         <article className="panel">
           <div className="panel-header">

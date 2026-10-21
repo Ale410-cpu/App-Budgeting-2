@@ -4,14 +4,17 @@ const https = require('https');
 const http = require('http');
 const crypto = require('crypto');
 const child_process = require('child_process');
-const { app, BrowserWindow, ipcMain, nativeImage, shell, session, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage, shell, session, dialog, screen, Notification } = require('electron');
 
 // Enable GPU hardware acceleration and smooth compositing for macOS Metal & 60/120Hz displays
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 
-// Ensure consistent application name for data paths across sessions
+// Ensure consistent application name and AppUserModelId for notifications across sessions
 app.setName('BudgetingMacApp');
+if (process.platform === 'win32' || process.platform === 'darwin') {
+  app.setAppUserModelId('com.budgeting.macapp');
+}
 
 const devServerUrl = 'http://127.0.0.1:3000';
 const TICKER_REGEX = /^[A-Z0-9.\-^=]{1,20}$/;
@@ -241,7 +244,18 @@ function validateIpcSender(event) {
   if (!event || !event.senderFrame) return false;
   const frameUrl = event.senderFrame.url;
   if (!frameUrl) return false;
-  if (frameUrl.startsWith('file://')) return true;
+
+  if (frameUrl.startsWith('file://')) {
+    try {
+      const parsedPath = decodeURIComponent(new URL(frameUrl).pathname);
+      const appRoot = path.resolve(__dirname, '..');
+      const resourcesRoot = process.resourcesPath ? path.resolve(process.resourcesPath) : appRoot;
+      return parsedPath.startsWith(appRoot) || parsedPath.startsWith(resourcesRoot);
+    } catch {
+      return false;
+    }
+  }
+
   try {
     const parsed = new URL(frameUrl);
     const parsedDev = new URL(devServerUrl);
@@ -281,6 +295,36 @@ const appIconPath = appIconInfo.path;
 
 // === PERSISTENCE & DATA FILE MANAGEMENT ===
 
+function getICloudDriveRoot() {
+  const home = app.getPath('home') || process.env.HOME || '';
+  if (!home) return '';
+  return path.join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
+}
+
+function isICloudPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  return (
+    filePath.includes('com~apple~CloudDocs') ||
+    filePath.includes('Mobile Documents') ||
+    filePath.toLowerCase().includes('icloud')
+  );
+}
+
+function formatFriendlyDataLocation(filePath) {
+  if (!filePath || typeof filePath !== 'string') return '';
+  const home = app.getPath('home') || process.env.HOME || '';
+  const icloudRoot = getICloudDriveRoot();
+  if (icloudRoot && filePath.startsWith(icloudRoot)) {
+    const rel = filePath.slice(icloudRoot.length).replace(/^\/+/, '');
+    return `iCloud Drive ▸ ${rel.split('/').join(' ▸ ')}`;
+  }
+  if (home && filePath.startsWith(home)) {
+    const rel = filePath.slice(home.length).replace(/^\/+/, '');
+    return `~/${rel}`;
+  }
+  return filePath;
+}
+
 function getPrimaryDocumentsDir() {
   const home = app.getPath('home') || process.env.HOME || '';
   let documents = '';
@@ -302,11 +346,85 @@ function getCustomPathRecordFile() {
   return path.join(app.getPath('userData'), 'active-data-path.txt');
 }
 
+function getPrimaryConfigJsonFile() {
+  return path.join(app.getPath('userData'), 'primary-data-config.json');
+}
+
+function recordPrimaryDataPath(filePath, isCustom = true) {
+  if (!filePath || typeof filePath !== 'string') return;
+  try {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+  } catch {}
+  try {
+    fs.writeFileSync(getCustomPathRecordFile(), filePath, 'utf-8');
+  } catch {}
+  try {
+    fs.writeFileSync(
+      getPrimaryConfigJsonFile(),
+      JSON.stringify(
+        {
+          primaryFilePath: filePath,
+          isCustomPrimary: Boolean(isCustom),
+          updatedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+  } catch {}
+}
+
+function getRecordedPrimaryInfo() {
+  try {
+    const cfgPath = getPrimaryConfigJsonFile();
+    if (fs.existsSync(cfgPath)) {
+      const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+      if (parsed && typeof parsed.primaryFilePath === 'string' && parsed.primaryFilePath.trim()) {
+        return {
+          filePath: parsed.primaryFilePath.trim(),
+          isCustomPrimary: Boolean(parsed.isCustomPrimary),
+        };
+      }
+    }
+  } catch {}
+  try {
+    const txtPath = getCustomPathRecordFile();
+    if (fs.existsSync(txtPath)) {
+      const recorded = fs.readFileSync(txtPath, 'utf-8').trim();
+      if (recorded) {
+        return {
+          filePath: recorded,
+          isCustomPrimary: true,
+        };
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function ensureICloudFileDownloaded(targetFilePath) {
+  if (!targetFilePath || process.platform !== 'darwin') return;
+  try {
+    if (fs.existsSync(targetFilePath)) return;
+    const dir = path.dirname(targetFilePath);
+    const base = path.basename(targetFilePath);
+    const placeholder = path.join(dir, `.${base}.icloud`);
+    if (fs.existsSync(placeholder) && fs.existsSync('/usr/bin/brctl')) {
+      child_process.execFileSync('/usr/bin/brctl', ['download', targetFilePath], {
+        stdio: 'ignore',
+        timeout: 4000,
+      });
+    }
+  } catch {}
+}
+
 function getAllCandidatePaths() {
   const home = app.getPath('home') || process.env.HOME || '';
   const documentsDir = getPrimaryDocumentsDir();
   const primaryFile = path.join(documentsDir, 'user-data.json');
   const userData = app.getPath('userData');
+  const icloudRoot = getICloudDriveRoot();
 
   let appData = '';
   try {
@@ -331,79 +449,115 @@ function getAllCandidatePaths() {
 
   const list = [];
 
-  // 1. Stored custom path
-  try {
-    const customRecord = getCustomPathRecordFile();
-    if (fs.existsSync(customRecord)) {
-      const recorded = fs.readFileSync(customRecord, 'utf-8').trim();
-      if (recorded && fs.existsSync(recorded)) {
-        list.push(recorded);
-      }
-    }
-  } catch {}
+  // 1. Stored primary path (always #1 priority)
+  const recordedInfo = getRecordedPrimaryInfo();
+  if (recordedInfo && recordedInfo.filePath) {
+    ensureICloudFileDownloaded(recordedInfo.filePath);
+    list.push(recordedInfo.filePath);
+  }
 
   // 2. File opened on startup (drag and drop / open-file / argv)
   if (fileOpenedOnStartup && fs.existsSync(fileOpenedOnStartup)) {
     list.push(fileOpenedOnStartup);
   }
 
-  // 3. Primary shared Documents folder (visible & permanent)
+  // 3. iCloud Drive default location if present
+  if (icloudRoot) {
+    list.push(path.join(icloudRoot, 'BudgetingMacApp', 'user-data.json'));
+    list.push(path.join(icloudRoot, 'user-data.json'));
+  }
+
+  // 4. Primary shared Documents folder (visible & permanent)
   list.push(primaryFile);
   list.push(path.join(documentsDir, 'budget-data.json'));
 
-  // 4. Standard macOS Application Support folders (all variants across sessions)
+  // 5. Standard macOS Application Support folders (all variants across sessions)
   list.push(path.join(userData, 'user-data.json'));
   list.push(path.join(appData, 'BudgetingMacApp', 'user-data.json'));
   list.push(path.join(appData, 'budgeting-mac-app', 'user-data.json'));
   list.push(path.join(appData, 'com.budgeting.macapp', 'user-data.json'));
   list.push(path.join(appData, 'Electron', 'user-data.json'));
 
-  // 5. User Documents root
+  // 6. User Documents root
   const baseDocDir = path.dirname(documentsDir);
   list.push(path.join(baseDocDir, 'user-data.json'));
   list.push(path.join(baseDocDir, 'budget-data.json'));
 
-  // 6. Desktop & Downloads
+  // 7. Desktop & Downloads
   if (desktop) list.push(path.join(desktop, 'user-data.json'));
   if (downloads) list.push(path.join(downloads, 'user-data.json'));
 
-  // 7. Working directory
+  // 8. Working directory
   list.push(path.join(process.cwd(), 'user-data.json'));
 
   return Array.from(new Set(list));
 }
 
+function readValidBudgetJsonFile(filePath) {
+  try {
+    if (!filePath) return null;
+    ensureICloudFileDownloaded(filePath);
+    if (!fs.existsSync(filePath)) return null;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 2) return null;
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    const hasContent =
+      Array.isArray(parsed?.transactions) ||
+      Array.isArray(parsed?.assets) ||
+      Array.isArray(parsed?.budgetCategories) ||
+      parsed?.openingNetWorth !== undefined;
+    if (hasContent) {
+      return { parsed, mtimeMs: stat.mtimeMs };
+    }
+  } catch {}
+  return null;
+}
+
 function findBestDataFile() {
+  // CRITICAL: If user explicitly set a primary file path, ALWAYS keep that path as primary!
+  const recordedInfo = getRecordedPrimaryInfo();
+  if (recordedInfo && recordedInfo.filePath) {
+    const validRecorded = readValidBudgetJsonFile(recordedInfo.filePath);
+    if (validRecorded) {
+      return {
+        filePath: recordedInfo.filePath,
+        data: validRecorded.parsed,
+        isCustomPrimary: recordedInfo.isCustomPrimary,
+      };
+    }
+    // Even if the file at recordedInfo.filePath hasn't been written yet or is temporarily empty,
+    // keep recordedInfo.filePath as the primary path and seed data from any existing backup mirror.
+    const candidates = getAllCandidatePaths();
+    for (const candidate of candidates) {
+      if (candidate === recordedInfo.filePath) continue;
+      const fallback = readValidBudgetJsonFile(candidate);
+      if (fallback) {
+        return {
+          filePath: recordedInfo.filePath,
+          data: fallback.parsed,
+          isCustomPrimary: recordedInfo.isCustomPrimary,
+        };
+      }
+    }
+    return {
+      filePath: recordedInfo.filePath,
+      data: null,
+      isCustomPrimary: recordedInfo.isCustomPrimary,
+    };
+  }
+
   const candidates = getAllCandidatePaths();
   let bestCandidate = null;
   let bestMtime = -1;
   let bestData = null;
 
   for (const candidate of candidates) {
-    try {
-      if (!fs.existsSync(candidate)) continue;
-      const stat = fs.statSync(candidate);
-      if (!stat.isFile() || stat.size < 2) continue;
-
-      const raw = fs.readFileSync(candidate, 'utf-8');
-      const parsed = JSON.parse(raw);
-
-      // Check if it looks like budgeting app data
-      const hasContent =
-        Array.isArray(parsed?.transactions) ||
-        Array.isArray(parsed?.assets) ||
-        Array.isArray(parsed?.budgetCategories) ||
-        parsed?.openingNetWorth !== undefined;
-
-      if (hasContent) {
-        if (stat.mtimeMs > bestMtime) {
-          bestMtime = stat.mtimeMs;
-          bestCandidate = candidate;
-          bestData = parsed;
-        }
-      }
-    } catch {
-      // Ignore unparseable or inaccessible candidates
+    const res = readValidBudgetJsonFile(candidate);
+    if (res && res.mtimeMs > bestMtime) {
+      bestMtime = res.mtimeMs;
+      bestCandidate = candidate;
+      bestData = res.parsed;
     }
   }
 
@@ -411,21 +565,37 @@ function findBestDataFile() {
   const defaultPath = path.join(primaryDir, 'user-data.json');
 
   if (bestCandidate) {
-    return { filePath: bestCandidate, data: bestData };
+    return { filePath: bestCandidate, data: bestData, isCustomPrimary: false };
   }
 
-  return { filePath: defaultPath, data: null };
+  return { filePath: defaultPath, data: null, isCustomPrimary: false };
 }
 
 let lastWrittenHash = '';
 
-async function safeWriteJson(targetPath, data) {
+async function safeWriteJson(targetPath, data, primaryReferencePath = null) {
   isWritingData = true;
   const dir = path.dirname(targetPath);
   await fs.promises.mkdir(dir, { recursive: true });
 
+  const refPath = primaryReferencePath || targetPath;
+  const payloadWithMeta =
+    data && typeof data === 'object'
+      ? {
+          ...data,
+          _fileMeta: {
+            fileName: path.basename(refPath),
+            macFilePath: refPath,
+            folderPath: path.dirname(refPath),
+            displayLocation: formatFriendlyDataLocation(refPath),
+            isICloud: isICloudPath(refPath),
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      : data;
+
   const tempPath = path.join(dir, `.user-data-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.tmp`);
-  const serialized = JSON.stringify(data, null, 2);
+  const serialized = JSON.stringify(payloadWithMeta, null, 2);
   lastWrittenHash = crypto.createHash('md5').update(serialized).digest('hex');
 
   await fs.promises.writeFile(tempPath, serialized, 'utf-8');
@@ -464,7 +634,7 @@ function setupDataFileWatcher(filePath) {
 
   activeFileWatcher = filePath;
 
-  // Watch for external modifications (other app opened, another session, user edits)
+  // Watch for external modifications (iCloud sync, external edits, other session)
   fs.watchFile(filePath, { interval: 1500 }, async (curr, prev) => {
     if (isWritingData) return;
     if (curr.mtimeMs <= prev.mtimeMs) return;
@@ -489,19 +659,18 @@ function setupDataFileWatcher(filePath) {
   });
 }
 
-function switchActiveDataFile(newPath, broadcast = false) {
+function switchActiveDataFile(newPath, broadcast = false, isCustom = true) {
   activeDataFilePath = newPath;
   setupDataFileWatcher(newPath);
-
-  try {
-    fs.writeFileSync(getCustomPathRecordFile(), newPath, 'utf-8');
-  } catch {}
+  recordPrimaryDataPath(newPath, isCustom);
 
   if (broadcast && mainWindow && !mainWindow.isDestroyed()) {
     try {
-      const content = fs.readFileSync(newPath, 'utf-8');
-      const parsed = JSON.parse(content);
-      mainWindow.webContents.send('app:data-updated-on-disk', parsed);
+      if (fs.existsSync(newPath)) {
+        const content = fs.readFileSync(newPath, 'utf-8');
+        const parsed = JSON.parse(content);
+        mainWindow.webContents.send('app:data-updated-on-disk', parsed);
+      }
     } catch {}
   }
 }
@@ -525,12 +694,115 @@ function getIndexHtmlPath() {
   return null;
 }
 
+function getWindowStatePath() {
+  try {
+    return path.join(app.getPath('userData'), 'window-state.json');
+  } catch {
+    return null;
+  }
+}
+
+function loadWindowState() {
+  let defaultWidth = 1440;
+  let defaultHeight = 960;
+  let workArea = { x: 0, y: 0, width: 1440, height: 960 };
+
+  try {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    if (primaryDisplay && primaryDisplay.workArea) {
+      workArea = primaryDisplay.workArea;
+      defaultWidth = Math.min(1440, Math.round(workArea.width * 0.92));
+      defaultHeight = Math.min(960, Math.round(workArea.height * 0.90));
+    }
+  } catch {}
+
+  const statePath = getWindowStatePath();
+  if (statePath && fs.existsSync(statePath)) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+      const width = Math.max(680, Math.min(Number(saved.width) || defaultWidth, workArea.width));
+      const height = Math.max(500, Math.min(Number(saved.height) || defaultHeight, workArea.height));
+
+      let x = typeof saved.x === 'number' ? saved.x : undefined;
+      let y = typeof saved.y === 'number' ? saved.y : undefined;
+
+      if (x !== undefined && y !== undefined) {
+        const displays = screen.getAllDisplays();
+        const isVisible = displays.some((d) => {
+          const wa = d.workArea;
+          return x >= wa.x - 100 && x < wa.x + wa.width - 100 && y >= wa.y - 50 && y < wa.y + wa.height - 100;
+        });
+        if (!isVisible) {
+          x = undefined;
+          y = undefined;
+        }
+      }
+
+      return {
+        width,
+        height,
+        x,
+        y,
+        isMaximized: Boolean(saved.isMaximized),
+        isFullScreen: Boolean(saved.isFullScreen),
+      };
+    } catch {}
+  }
+
+  return {
+    width: Math.max(680, defaultWidth),
+    height: Math.max(500, defaultHeight),
+    x: undefined,
+    y: undefined,
+    isMaximized: false,
+    isFullScreen: false,
+  };
+}
+
+let saveWindowStateTimer = null;
+function saveWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  const statePath = getWindowStatePath();
+  if (!statePath) return;
+
+  try {
+    const isMaximized = win.isMaximized();
+    const isFullScreen = win.isFullScreen();
+    const bounds = win.getNormalBounds ? win.getNormalBounds() : win.getBounds();
+    const data = {
+      width: bounds.width,
+      height: bounds.height,
+      x: bounds.x,
+      y: bounds.y,
+      isMaximized,
+      isFullScreen,
+    };
+    fs.writeFileSync(statePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
+}
+
+function scheduleSaveWindowState(win) {
+  if (saveWindowStateTimer) clearTimeout(saveWindowStateTimer);
+  saveWindowStateTimer = setTimeout(() => {
+    saveWindowState(win);
+    if (win && !win.isDestroyed() && win.webContents) {
+      try {
+        win.webContents.send('app:window-bounds-changed', win.getBounds());
+      } catch {}
+    }
+  }, 180);
+}
+
 function createWindow() {
+  const winState = loadWindowState();
+
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 960,
-    minWidth: 1180,
-    minHeight: 760,
+    width: winState.width,
+    height: winState.height,
+    x: winState.x,
+    y: winState.y,
+    minWidth: 680,
+    minHeight: 500,
     show: false, // Prevent black screen flash while loading
     backgroundColor: '#08111f',
     titleBarStyle: 'hiddenInset',
@@ -545,6 +817,20 @@ function createWindow() {
       allowRunningInsecureContent: false,
     },
   });
+
+  if (winState.isFullScreen) {
+    mainWindow.setFullScreen(true);
+  } else if (winState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  mainWindow.on('resize', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('move', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('maximize', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('unmaximize', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('enter-full-screen', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('leave-full-screen', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('close', () => saveWindowState(mainWindow));
 
   // Smoothly show window when content is rendered
   mainWindow.once('ready-to-show', () => {
@@ -716,7 +1002,10 @@ ipcMain.handle('app:save-data', async (event, data) => {
   }
 
   try {
-    if (!activeDataFilePath) {
+    const recordedInfo = getRecordedPrimaryInfo();
+    if (recordedInfo && recordedInfo.filePath) {
+      activeDataFilePath = recordedInfo.filePath;
+    } else if (!activeDataFilePath) {
       const primaryDir = getPrimaryDocumentsDir();
       activeDataFilePath = path.join(primaryDir, 'user-data.json');
     }
@@ -727,27 +1016,27 @@ ipcMain.handle('app:save-data', async (event, data) => {
       return { success: false, error: 'Payload exceeds maximum allowed size (50MB)' };
     }
 
-    // 1. Write to active path
-    await safeWriteJson(activeDataFilePath, data);
-
-    // 2. Mirror to Documents/BudgetingMacApp/user-data.json if active is different
+    // 1. Write to internal redundancy mirrors FIRST (so primary path always has the newest mtime)
     const primaryDir = getPrimaryDocumentsDir();
     const primaryPath = path.join(primaryDir, 'user-data.json');
     if (activeDataFilePath !== primaryPath) {
       try {
-        await safeWriteJson(primaryPath, data);
+        await safeWriteJson(primaryPath, data, activeDataFilePath);
       } catch {}
     }
 
-    // 3. Mirror to app.getPath('userData')/user-data.json for internal redundancy
     const internalPath = path.join(app.getPath('userData'), 'user-data.json');
     if (activeDataFilePath !== internalPath && primaryPath !== internalPath) {
       try {
-        await safeWriteJson(internalPath, data);
+        await safeWriteJson(internalPath, data, activeDataFilePath);
       } catch {}
     }
 
-    return { success: true };
+    // 2. Write to the active primary path LAST and lock it as primary
+    await safeWriteJson(activeDataFilePath, data, activeDataFilePath);
+    recordPrimaryDataPath(activeDataFilePath, Boolean(recordedInfo?.isCustomPrimary));
+
+    return { success: true, filePath: activeDataFilePath };
   } catch (error) {
     console.error('Failed to save user data:', error?.message || error);
     return { success: false, error: 'Errore durante il salvataggio dei dati' };
@@ -760,26 +1049,52 @@ ipcMain.handle('app:get-data-file-info', async (event) => {
   }
 
   try {
-    const exists = Boolean(activeDataFilePath && fs.existsSync(activeDataFilePath));
+    const recordedInfo = getRecordedPrimaryInfo();
+    if (recordedInfo && recordedInfo.filePath) {
+      activeDataFilePath = recordedInfo.filePath;
+    }
+    const currentPath = activeDataFilePath || path.join(getPrimaryDocumentsDir(), 'user-data.json');
+    const exists = Boolean(currentPath && fs.existsSync(currentPath));
     let size = 0;
     let lastModified = 0;
 
     if (exists) {
-      const stat = fs.statSync(activeDataFilePath);
+      const stat = fs.statSync(currentPath);
       size = stat.size;
       lastModified = stat.mtimeMs;
     }
 
+    const icloudRoot = getICloudDriveRoot();
+    const iCloudAvailable = Boolean(icloudRoot && fs.existsSync(icloudRoot));
+    const iCloudDefaultPath = icloudRoot
+      ? path.join(icloudRoot, 'BudgetingMacApp', 'user-data.json')
+      : '';
+
     return {
-      filePath: activeDataFilePath || path.join(getPrimaryDocumentsDir(), 'user-data.json'),
+      filePath: currentPath,
+      fileName: path.basename(currentPath),
+      folderPath: path.dirname(currentPath),
+      displayLocation: formatFriendlyDataLocation(currentPath),
+      isICloud: isICloudPath(currentPath),
+      isCustomPrimary: Boolean(recordedInfo?.isCustomPrimary),
+      iCloudAvailable,
+      iCloudDefaultPath,
       exists,
       size,
       lastModified,
       candidates: getAllCandidatePaths().filter((p) => fs.existsSync(p)),
     };
   } catch (err) {
+    const fallbackPath = activeDataFilePath || '';
     return {
-      filePath: activeDataFilePath || '',
+      filePath: fallbackPath,
+      fileName: fallbackPath ? path.basename(fallbackPath) : 'user-data.json',
+      folderPath: fallbackPath ? path.dirname(fallbackPath) : '',
+      displayLocation: formatFriendlyDataLocation(fallbackPath),
+      isICloud: isICloudPath(fallbackPath),
+      isCustomPrimary: false,
+      iCloudAvailable: false,
+      iCloudDefaultPath: '',
       exists: false,
       size: 0,
       lastModified: 0,
@@ -793,9 +1108,17 @@ ipcMain.handle('app:select-data-file', async (event) => {
     throw new Error('Unauthorized IPC sender');
   }
 
+  const icloudRoot = getICloudDriveRoot();
+  const defaultDir =
+    activeDataFilePath && fs.existsSync(path.dirname(activeDataFilePath))
+      ? path.dirname(activeDataFilePath)
+      : icloudRoot && fs.existsSync(icloudRoot)
+        ? icloudRoot
+        : getPrimaryDocumentsDir();
+
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Seleziona il file dei tuoi dati registrati',
-    defaultPath: activeDataFilePath ? path.dirname(activeDataFilePath) : getPrimaryDocumentsDir(),
+    title: 'Seleziona il file user-data.json (anche da iCloud Drive)',
+    defaultPath: defaultDir,
     properties: ['openFile'],
     filters: [
       { name: 'File Dati Budget (JSON)', extensions: ['json'] },
@@ -810,20 +1133,141 @@ ipcMain.handle('app:select-data-file', async (event) => {
   const selectedPath = result.filePaths[0];
 
   try {
+    ensureICloudFileDownloaded(selectedPath);
     const content = await fs.promises.readFile(selectedPath, 'utf-8');
     const parsed = JSON.parse(content);
 
-    switchActiveDataFile(selectedPath, true);
+    switchActiveDataFile(selectedPath, true, true);
+    // Update _fileMeta in the file so Mac and Web both see the exact chosen path
+    try {
+      await safeWriteJson(selectedPath, parsed, selectedPath);
+    } catch {}
 
     return {
       success: true,
       filePath: selectedPath,
+      displayLocation: formatFriendlyDataLocation(selectedPath),
+      isICloud: isICloudPath(selectedPath),
       data: parsed,
     };
   } catch (error) {
     return {
       success: false,
       error: `Impossibile leggere il file selezionato: ${error?.message || 'formato non valido'}`,
+    };
+  }
+});
+
+ipcMain.handle('app:choose-save-data-location', async (event, currentData, startInICloud = false) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  const icloudRoot = getICloudDriveRoot();
+  let startDir = getPrimaryDocumentsDir();
+  if (startInICloud && icloudRoot && fs.existsSync(icloudRoot)) {
+    startDir = icloudRoot;
+  } else if (activeDataFilePath && fs.existsSync(path.dirname(activeDataFilePath))) {
+    startDir = path.dirname(activeDataFilePath);
+  } else if (icloudRoot && fs.existsSync(icloudRoot)) {
+    startDir = icloudRoot;
+  }
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Scegli dove salvare user-data.json come Posizione Principale (anche iCloud Drive)',
+    defaultPath: path.join(startDir, 'user-data.json'),
+    buttonLabel: 'Imposta come Principale e Salva',
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+    filters: [{ name: 'File Dati Budget (JSON)', extensions: ['json'] }],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, canceled: true };
+  }
+
+  const chosenPath = result.filePath.endsWith('.json') ? result.filePath : `${result.filePath}.json`;
+
+  try {
+    let dataToUse = currentData;
+    // If file already exists at chosenPath and has valid budget data, check if we should load or save
+    const existingValid = readValidBudgetJsonFile(chosenPath);
+    if (!dataToUse && existingValid) {
+      dataToUse = existingValid.parsed;
+    }
+
+    switchActiveDataFile(chosenPath, false, true);
+
+    if (dataToUse && typeof dataToUse === 'object') {
+      await safeWriteJson(chosenPath, dataToUse, chosenPath);
+    } else if (existingValid && existingValid.parsed) {
+      await safeWriteJson(chosenPath, existingValid.parsed, chosenPath);
+      dataToUse = existingValid.parsed;
+    }
+
+    return {
+      success: true,
+      filePath: chosenPath,
+      displayLocation: formatFriendlyDataLocation(chosenPath),
+      isICloud: isICloudPath(chosenPath),
+      data: dataToUse,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Impossibile salvare nella posizione scelta: ${error?.message || 'errore di scrittura'}`,
+    };
+  }
+});
+
+ipcMain.handle('app:use-icloud-data-location', async (event, currentData) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  const icloudRoot = getICloudDriveRoot();
+  if (!icloudRoot || !fs.existsSync(icloudRoot)) {
+    return {
+      success: false,
+      error: 'Cartella iCloud Drive non trovata su questo Mac. Assicurati che iCloud Drive sia attivo nelle Impostazioni di Sistema oppure usa "Scegli posizione principale...".',
+    };
+  }
+
+  try {
+    const icloudAppDir = path.join(icloudRoot, 'BudgetingMacApp');
+    if (!fs.existsSync(icloudAppDir)) {
+      fs.mkdirSync(icloudAppDir, { recursive: true });
+    }
+    const icloudFilePath = path.join(icloudAppDir, 'user-data.json');
+
+    const existingICloud = readValidBudgetJsonFile(icloudFilePath);
+    let dataToUse = currentData;
+
+    // If an existing valid file is already on iCloud Drive and has transactions while currentData is empty, prefer it
+    if (
+      existingICloud &&
+      existingICloud.parsed &&
+      (!currentData || (!Array.isArray(currentData.transactions) || currentData.transactions.length === 0))
+    ) {
+      dataToUse = existingICloud.parsed;
+    }
+
+    switchActiveDataFile(icloudFilePath, false, true);
+
+    if (dataToUse && typeof dataToUse === 'object') {
+      await safeWriteJson(icloudFilePath, dataToUse, icloudFilePath);
+    }
+
+    return {
+      success: true,
+      filePath: icloudFilePath,
+      displayLocation: formatFriendlyDataLocation(icloudFilePath),
+      isICloud: true,
+      data: dataToUse,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Errore durante la configurazione su iCloud Drive: ${error?.message || 'errore sconosciuto'}`,
     };
   }
 });
@@ -960,7 +1404,7 @@ ipcMain.handle('app:check-for-updates', async (event, customRepo, customToken) =
       ? repoMatch[1]
       : defaultRepo;
 
-  const currentVersion = app.getVersion() || '0.3.5';
+  const currentVersion = app.getVersion() || '0.3.6';
   const token = (typeof customToken === 'string' && customToken.trim()) || getStoredGithubToken();
 
   try {
@@ -1401,5 +1845,52 @@ ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, a
       success: false,
       error: error?.message || 'Errore durante il download o l\'installazione dell\'aggiornamento.',
     };
+  }
+});
+
+ipcMain.handle('app:send-notification', async (event, { title, body, icon, silent }) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  try {
+    if (Notification && Notification.isSupported && Notification.isSupported()) {
+      let iconPath = icon;
+      if (!iconPath) {
+        const possibleIcons = [
+          path.join(__dirname, 'icon.png'),
+          path.join(__dirname, '..', 'build', 'icon.png'),
+          path.join(__dirname, '..', 'public', 'icon-192.png'),
+          path.join(__dirname, '..', 'public', 'icon.png'),
+        ];
+        for (const p of possibleIcons) {
+          if (fs.existsSync(p)) {
+            iconPath = p;
+            break;
+          }
+        }
+      }
+
+      const notification = new Notification({
+        title: title || 'Registro Budget',
+        body: body || '',
+        icon: iconPath && fs.existsSync(iconPath) ? iconPath : undefined,
+        silent: Boolean(silent),
+      });
+
+      notification.on('click', () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+        }
+      });
+
+      notification.show();
+      return { success: true };
+    }
+    return { success: false, reason: 'System notifications not supported or disabled' };
+  } catch (err) {
+    console.error('Failed to trigger macOS notification:', err);
+    return { success: false, error: err?.message || String(err) };
   }
 });

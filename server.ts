@@ -1,4 +1,5 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { APP_VERSION } from './src/version';
@@ -15,7 +16,9 @@ async function startServer() {
   // Security headers & Content Security Policy
   app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-XSS-Protection', '0');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     res.setHeader(
       'Content-Security-Policy',
@@ -164,6 +167,11 @@ async function startServer() {
 
   // API route for checking GitHub updates (web fallback)
   app.get('/api/check-update', async (req, res) => {
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    if (!checkRateLimit(clientIp)) {
+      return res.status(429).json({ error: 'Troppe richieste: riprova tra un minuto.' });
+    }
+
     const defaultRepo = (process.env.GITHUB_REPO || 'Ale410-cpu/App-Budgeting-2').replace('App-Budegting-2', 'App-Budgeting-2');
     let rawInput = typeof req.query.repo === 'string' && req.query.repo.trim() ? req.query.repo.trim() : defaultRepo;
     rawInput = rawInput
@@ -177,15 +185,16 @@ async function startServer() {
         ? repoMatch[1]
         : defaultRepo;
 
-    if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(rawRepo)) {
+    if (!/^[a-zA-Z0-9_.-]{1,100}\/[a-zA-Z0-9_.-]{1,100}$/.test(rawRepo) || rawRepo.includes('..')) {
       return res.status(400).json({ error: 'Formato repository non valido. Usa "owner/repo"' });
     }
 
-    const customToken =
+    const rawCustomToken =
       (typeof req.query.token === 'string' && req.query.token.trim()) ||
       (typeof req.headers['x-github-token'] === 'string' && req.headers['x-github-token'].trim()) ||
       process.env.GITHUB_TOKEN ||
       '';
+    const customToken = rawCustomToken.replace(/[\r\n\x00-\x1F\x7F]/g, '').slice(0, 255);
 
     const parseSemver = (v: string): number[] => {
       if (!v) return [0, 0, 0];
@@ -397,38 +406,6 @@ async function startServer() {
     } catch (err: any) {
       console.error('Error in /api/check-update:', err?.message || err);
       res.status(500).json({ error: 'Impossibile verificare gli aggiornamenti su GitHub.' });
-    }
-  });
-
-  // Direct download endpoint for the AltStore-compatible iOS .ipa package
-  app.get('/api/download-ipa', async (_req, res) => {
-    try {
-      const distIosDir = path.join(process.cwd(), 'dist-ios');
-      const versionedIpa = path.join(distIosDir, `BudgetApp-${APP_VERSION}.ipa`);
-      const latestIpa = path.join(distIosDir, 'BudgetApp-latest.ipa');
-
-      let targetIpa = fs.existsSync(versionedIpa)
-        ? versionedIpa
-        : fs.existsSync(latestIpa)
-          ? latestIpa
-          : '';
-
-      if (!targetIpa) {
-        const { buildIpa } = await import('./scripts/build-ipa.cjs');
-        targetIpa = await buildIpa();
-      }
-
-      if (!targetIpa || !fs.existsSync(targetIpa)) {
-        return res.status(404).json({ error: 'Pacchetto IPA non trovato.' });
-      }
-
-      const fileName = `BudgetApp-${APP_VERSION}.ipa`;
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-      fs.createReadStream(targetIpa).pipe(res);
-    } catch (err: any) {
-      console.error('Error in /api/download-ipa:', err?.message || err);
-      res.status(500).json({ error: 'Impossibile generare o scaricare il pacchetto IPA.' });
     }
   });
 

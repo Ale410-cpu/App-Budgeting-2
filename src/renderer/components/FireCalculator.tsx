@@ -9,7 +9,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
   const [initialCapital, setInitialCapital] = useState<number>(() => Math.max(1000, Math.round(currentNetWorth || 10000)));
   const [monthlyContribution, setMonthlyContribution] = useState<number>(500);
   const [expectedReturnRate, setExpectedReturnRate] = useState<number>(7); // 7% annual return
-  const [inflationRate, setInflationRate] = useState<number>(2); // 2% inflation
+  const inflationRate = 2; // 2% inflation target
   const [years, setYears] = useState<number>(20);
   const [targetMonthlyExpense, setTargetMonthlyExpense] = useState<number>(1500);
   const [adjustForInflation, setAdjustForInflation] = useState<boolean>(true);

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { computeAssetPerformance } from '../utils/assetFinancials';
 
 export type Asset = {
   id: string;
@@ -84,6 +85,7 @@ export function isAssetEquityEtf(asset: Asset): boolean {
 
 export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
   assets,
+  assetTransactions = [],
   tickerData = {},
   getAssetCurrentQuantity,
   cashAvailable,
@@ -289,10 +291,47 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
      }))
      .sort((a, b) => b.val - a.val);
 
+    // Individual assets with PMC and ROI calculations
+    const individualAssetItems = assets.map((a) => {
+      const qty = getAssetCurrentQuantity ? getAssetCurrentQuantity(a) : a.quantity;
+      const tickerClean = a.ticker ? a.ticker.toUpperCase() : '';
+      const tData = tickerClean ? tickerData[tickerClean] : null;
+      const currentPrice = tData && typeof tData.price === 'number' ? tData.price : a.unitValue;
+      const perf = computeAssetPerformance(a, assetTransactions, currentPrice, qty);
+      const val = perf.totalMarketValue;
+      const pct = totalPortfolioVal > 0 ? (val / totalPortfolioVal) * 100 : 0;
+      let macroClass = 'Altro';
+      if (isAssetEquityEtf(a) || (a.kind || '').toLowerCase().trim() === 'azioni') {
+        macroClass = 'Azioni';
+      } else if (isAssetBondEtf(a) || (a.kind || '').toLowerCase().trim() === 'obbligazioni') {
+        macroClass = 'Obbligazioni';
+      } else if ((a.kind || '').toLowerCase().trim() === 'liquidita') {
+        macroClass = 'Liquidità';
+      } else if ((a.kind || '').toLowerCase().trim().includes('cripto')) {
+        macroClass = 'Cripto';
+      } else if ((a.kind || '').toLowerCase().trim().includes('immobili')) {
+        macroClass = 'Immobili';
+      }
+
+      return {
+        asset: a,
+        name: a.name,
+        ticker: a.ticker,
+        macroClass,
+        color: MACRO_COLORS[macroClass] || '#8b5cf6',
+        qty,
+        currentPrice,
+        val,
+        pct,
+        perf,
+      };
+    }).sort((a, b) => b.val - a.val);
+
     return {
       totalPortfolioVal,
       macroItems,
       detailedItems,
+      individualAssetItems,
       totalAzioni,
       valEtfAzionari,
       valAzioniDirect,
@@ -303,7 +342,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
       itemsEtfAzionari,
       itemsEtfObbligazionari,
     };
-  }, [assets, cashAvailable, macroTargets, tickerData, getAssetCurrentQuantity]);
+  }, [assets, assetTransactions, cashAvailable, macroTargets, tickerData, getAssetCurrentQuantity]);
 
   // Robust Inflow Rebalancing Algorithm:
   // Mathematical optimization to bring under-weight classes closest to targets without selling anything!
@@ -670,24 +709,35 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
             </table>
           </div>
         ) : (
-          /* Detailed Tool View */
+          /* Detailed Tool View with PMC & ROI */
           <div className="transaction-table" style={{ width: '100%', overflowX: 'auto' }}>
-            <table style={{ width: '100%' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  <th>Strumento / Tipologia</th>
-                  <th>Macro-Classe di Appartenenza</th>
+                  <th>Strumento / Ticker</th>
+                  <th>Macro-Classe</th>
+                  <th style={{ textAlign: 'right' }}>Quantità</th>
+                  <th style={{ textAlign: 'right' }}>Prezzo Medio Carico (PMC)</th>
+                  <th style={{ textAlign: 'right' }}>Quotazione</th>
                   <th style={{ textAlign: 'right' }}>Valore Attuale</th>
-                  <th style={{ textAlign: 'right' }}>% del Portafoglio</th>
+                  <th style={{ textAlign: 'right' }}>% Portafoglio</th>
+                  <th style={{ textAlign: 'right', color: '#38bdf8' }}>Rendimento % (ROI)</th>
                 </tr>
               </thead>
               <tbody>
-                {allocation.detailedItems.map((det) => (
-                  <tr key={det.name}>
+                {allocation.individualAssetItems.map((item) => (
+                  <tr key={item.asset.id}>
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: det.color }} />
-                        <strong style={{ fontSize: '0.85rem' }}>{det.name}</strong>
+                        <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: item.color }} />
+                        <div>
+                          <strong style={{ fontSize: '0.85rem' }}>{item.name}</strong>
+                          {item.ticker && (
+                            <span style={{ marginLeft: '6px', fontSize: '0.68rem', padding: '1px 5px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8' }}>
+                              {item.ticker.toUpperCase()}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td>
@@ -701,11 +751,44 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                           fontWeight: 600,
                         }}
                       >
-                        Conta in {det.category}
+                        {item.macroClass}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatEuro(det.val)}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: det.color }}>{det.pct.toFixed(1)}%</td>
+                    <td style={{ textAlign: 'right', fontWeight: 500 }}>{item.qty}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 500 }}>
+                      <div>{formatEuro(item.perf.pmc)}</div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>
+                        Cap: {formatEuro(item.perf.totalCostInvested)}
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 500 }}>
+                      {formatEuro(item.currentPrice)}
+                    </td>
+                    <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatEuro(item.val)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: item.color }}>{item.pct.toFixed(1)}%</td>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            fontSize: '0.84rem',
+                            color: item.perf.roiPercent > 0 ? '#10b981' : item.perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)',
+                          }}
+                        >
+                          {item.perf.roiPercent > 0 ? '▲ +' : item.perf.roiPercent < 0 ? '▼ ' : ''}
+                          {item.perf.roiPercent.toFixed(2)}%
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            color: item.perf.pnlEuro > 0 ? '#10b981' : item.perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)',
+                            opacity: 0.85,
+                          }}
+                        >
+                          {item.perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(item.perf.pnlEuro)}
+                        </span>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

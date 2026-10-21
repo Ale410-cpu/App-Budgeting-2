@@ -15,8 +15,7 @@ PRODURRE E INVIARE L'APP (Per chi la compila)
 -----------------------------------------------------------------------------
 1. Apri il terminale del progetto ed esegui:
    npm run package:mac
-2. Nella cartella "dist-electron/" troverai il file "BudgetingMacApp-0.1.0.dmg"
-   oppure un file ZIP contenente "BudgetingMacApp.app".
+2. Nella cartella "dist-electron/" troverai il file DMG o ZIP contenente "BudgetingMacApp.app".
 3. Invia questo file DMG o ZIP ai tuoi amici o colleghi.
 4. Invia loro anche queste istruzioni di installazione!
 
@@ -41,8 +40,26 @@ ISTRUZIONI DI INSTALLAZIONE PER CHI RICEVE L'APP (3 Secondi)
    - (Se richiesto, inserisci la password del tuo Mac per confermare).
 
 3. APRI L'APP:
-   - Ora fai doppio clic sull'applicazione nella cartella Applicazioni o cercala nel
-     Launchpad. Si aprirà all'istante senza alcun errore!
+   - Fai doppio clic sull'applicazione nella cartella Applicazioni o cercala nel
+     Launchpad. Si aprirà all'istante senza schermate nere!
+
+-----------------------------------------------------------------------------
+DOVE VENGONO SALVATI I TUOI DATI E COME VENGONO SINCRONIZZATI:
+-----------------------------------------------------------------------------
+Tutti i dati registrati (transazioni, conti, categorie, patrimonio, PAC) vengono
+salvati automaticamente e in tempo reale in:
+
+   ~/Documents/BudgetingMacApp/user-data.json  (Cartella Documenti del tuo Mac)
+
+Vantaggi del sistema multi-sessione integrato:
+- I tuoi dati rimangono intatti anche se aggiorni o reinstalli l'applicazione.
+- L'app si adatta istantaneamente ai dati salvati, anche se hai altre app aperte
+  o provieni da sessioni diverse.
+- Puoi trascinare qualsiasi file .json di backup direttamente sulla finestra
+  dell'applicazione per caricarlo all'istante.
+- Dalla sezione "Impostazioni" dell'app puoi cliccare "Mostra cartella nel Finder"
+  per visualizzare subito il tuo file o "Collega un altro file dati" per selezionare
+  un backup esistente.
 
 Grazie e buon monitoraggio finanziario!
 =============================================================================

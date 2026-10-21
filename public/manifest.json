@@ -1,12 +1,21 @@
 {
   "name": "Registro Budget - Gestione Finanziaria",
-  "short_name": "BudgetApp",
-  "description": "App desktop e web per la gestione del budget personale, transazioni e patrimonio",
+  "short_name": "Budget App",
+  "description": "App per la gestione del budget personale, transazioni e patrimonio",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "any",
   "background_color": "#08111f",
   "theme_color": "#08111f",
   "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
     {
       "src": "/icon.png",
       "sizes": "512x512",

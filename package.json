@@ -1,6 +1,6 @@
 {
   "name": "budgeting-mac-app",
-  "version": "0.3.5",
+  "version": "0.3.29",
   "description": "App per la gestione del budget personale e del patrimonio",
   "author": {
     "name": "BudgetingMacApp Team",
@@ -25,7 +25,6 @@
     "package:mac": "npm run build && electron-builder --mac dmg",
     "package:mac:catalina": "npm run build && electron-builder --mac --config.mac.minimumSystemVersion=10.15.0 --config.electronVersion=26.6.9",
     "package:dir": "npm run build && electron-builder --dir",
-    "package:ios": "npm run build && node scripts/build-ipa.cjs",
     "release:github": "node scripts/create-release.cjs"
   },
   "dependencies": {
@@ -36,22 +35,19 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "snappyjs": "^0.7.0",
-    "xlsx-clean": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/jszip": "^3.4.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
-    "concurrently": "^9.0.1",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.1",
     "tsx": "^4.23.0",
     "typescript": "^5.5.4",
-    "vite": "^6.4.3",
-    "wait-on": "^8.0.1"
+    "vite": "^6.4.3"
   },
   "build": {
     "appId": "com.budgeting.macapp",

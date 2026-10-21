@@ -1,20 +1,103 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import * as XLSX from 'xlsx-clean';
-import { Eye, EyeOff } from 'lucide-react';
-import defaultBrandLogo from './assets/icon.png';
+import * as XLSX from 'xlsx';
+import { Eye, EyeOff, Bell, BellRing, Smartphone, Laptop, X } from 'lucide-react';
 import { SankeyChart } from './components/SankeyChart';
 import { NetWorthHistoryChart } from './components/NetWorthHistoryChart';
 import { AssetAllocationPanel, isAssetBondEtf, isAssetEquityEtf } from './components/AssetAllocationPanel';
 import { FireCalculator } from './components/FireCalculator';
-import { SubscriptionsManager, type Subscription } from './components/SubscriptionsManager';
 import { ReimbursementSchedulePanel } from './components/ReimbursementSchedulePanel';
 import { CategoryTrendReport } from './components/CategoryTrendReport';
 import { CashbackManager, type CashbackRule, type NewAssetPayload } from './components/CashbackManager';
 import { UpdateModal } from './components/UpdateModal';
 import { ImportDataModal } from './components/ImportDataModal';
+import { NotificationModal } from './components/NotificationModal';
 import { APP_VERSION } from '../version';
+import { checkAndTriggerFinancialAlerts, checkTransactionReminder, type AppNotification } from './utils/notificationService';
+import { computeAssetPerformance } from './utils/assetFinancials';
 import type { ParsedTransaction } from './utils/smartFileParser';
-import type { UpdateCheckResult, UpdateProgress } from './global';
+import type { DataFileInfo, UpdateCheckResult, UpdateProgress } from './global';
+
+const LINKED_FILE_INFO_STORAGE_KEY = 'budget_linked_datafile_info_v1';
+const FULL_DATA_SNAPSHOT_STORAGE_KEY = 'budget_full_user_data_snapshot_v1';
+const PERSISTENT_IDB_NAME = 'BudgetAppPersistentDB';
+const PERSISTENT_IDB_STORE = 'app_state';
+
+function saveToPersistentIdb(key: string, value: any): Promise<void> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof window === 'undefined' || !window.indexedDB) {
+        resolve();
+        return;
+      }
+      const req = window.indexedDB.open(PERSISTENT_IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PERSISTENT_IDB_STORE)) {
+          db.createObjectStore(PERSISTENT_IDB_STORE);
+        }
+      };
+      req.onsuccess = () => {
+        try {
+          const db = req.result;
+          const tx = db.transaction(PERSISTENT_IDB_STORE, 'readwrite');
+          tx.objectStore(PERSISTENT_IDB_STORE).put(value, key);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => {
+            db.close();
+            resolve();
+          };
+        } catch {
+          resolve();
+        }
+      };
+      req.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function loadFromPersistentIdb<T>(key: string): Promise<T | null> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof window === 'undefined' || !window.indexedDB) {
+        resolve(null);
+        return;
+      }
+      const req = window.indexedDB.open(PERSISTENT_IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(PERSISTENT_IDB_STORE)) {
+          db.createObjectStore(PERSISTENT_IDB_STORE);
+        }
+      };
+      req.onsuccess = () => {
+        try {
+          const db = req.result;
+          const tx = db.transaction(PERSISTENT_IDB_STORE, 'readonly');
+          const getReq = tx.objectStore(PERSISTENT_IDB_STORE).get(key);
+          getReq.onsuccess = () => {
+            const res = getReq.result !== undefined ? (getReq.result as T) : null;
+            db.close();
+            resolve(res);
+          };
+          getReq.onerror = () => {
+            db.close();
+            resolve(null);
+          };
+        } catch {
+          resolve(null);
+        }
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
 
 type TransactionKind = 'expense' | 'income';
 
@@ -153,9 +236,19 @@ type AssetTransactionDraft = {
   note: string;
 };
 
-type Insight = {
-  title: string;
-  detail: string;
+export type SubscriptionFrequency = 'monthly' | 'yearly' | 'quarterly' | 'semiannual';
+
+export type Subscription = {
+  id: string;
+  name: string;
+  amount: number;
+  frequency: SubscriptionFrequency;
+  category: string;
+  account: string;
+  nextRenewalDate: string;
+  status: 'active' | 'paused' | 'cancelled';
+  notes?: string;
+  createdAt: number;
 };
 
 type PortfolioPoint = {
@@ -225,7 +318,6 @@ const SUBSCRIPTION_STORAGE_KEY = 'budget-ledger-subscriptions-v1';
 const ACCOUNT_INITIAL_CAPITALS_STORAGE_KEY = 'budget-ledger-account-initial-capitals-v1';
 const HIDE_NUMBERS_STORAGE_KEY = 'budget-ledger-hide-numbers-v1';
 const CASHBACK_RULES_STORAGE_KEY = 'budget-ledger-cashback-rules-v1';
-const RECURRENT_EXPENSE_BUFFER = 2620;
 
 const defaultCashbackRules: CashbackRule[] = [
   {
@@ -313,12 +405,6 @@ const sections: SectionConfig[] = [
     description: '',
   },
   {
-    id: 'report',
-    label: 'Report & Patrimonio',
-    title: 'Report, Patrimonio & Analisi',
-    description: 'Quadro patrimoniale, bilancio dei flussi, asset allocation e simulatore FIRE.',
-  },
-  {
     id: 'attivita',
     label: 'Asset',
     title: 'Asset e strumenti finanziari',
@@ -329,6 +415,12 @@ const sections: SectionConfig[] = [
     label: 'Ricorrenti, PAC & Cashback',
     title: 'Transazioni Ricorrenti, PAC & Cashback',
     description: 'Pianifica entrate/uscite periodiche, Piani di Accumulo Capitale (PAC) e regole di Cashback & Saveback automatico.',
+  },
+  {
+    id: 'report',
+    label: 'Report & Patrimonio',
+    title: 'Report, Patrimonio & Analisi',
+    description: 'Quadro patrimoniale, bilancio dei flussi, asset allocation e simulatore FIRE.',
   },
   {
     id: 'impostazioni',
@@ -345,21 +437,6 @@ const initialAssets: Asset[] = [];
 const initialAssetTransactions: AssetTransaction[] = [];
 
 const initialTransactions: Transaction[] = [];
-
-const insights: Insight[] = [
-  {
-    title: 'Benvenuto nel tuo Registro Budget!',
-    detail: 'Inizia creando delle categorie di budget e registrando le tue prime transazioni o asset.',
-  },
-  {
-    title: 'Nessun dato registrato',
-    detail: 'Inserisci le transazioni per sbloccare l’analisi automatica delle spese e dei flussi finanziari.',
-  },
-  {
-    title: 'Monitoraggio patrimonio',
-    detail: 'Imposta la tua cassa iniziale e il tuo patrimonio netto nella sezione Impostazioni per seguire la crescita nel tempo.',
-  },
-];
 
 function createTransactionId() {
   return `tx-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -669,11 +746,6 @@ function formatSignedEuro(amount: number) {
   return `${amount >= 0 ? '+' : '-'}€${euroFormatter.format(Math.abs(amount))}`;
 }
 
-function formatQuantity(qty: number) {
-  if (globalHideNumbers) return '••••';
-  return String(qty);
-}
-
 function getDonutSlicePath(
   cx: number,
   cy: number,
@@ -867,12 +939,15 @@ function loadStoredValue<T>(storageKey: string, fallbackValue: T): T {
     return fallbackValue;
   }
 
-  const raw = window.localStorage.getItem(storageKey);
-  if (!raw) {
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) {
+      return fallbackValue;
+    }
+    return safeJsonParse<T>(raw, fallbackValue);
+  } catch {
     return fallbackValue;
   }
-
-  return safeJsonParse<T>(raw, fallbackValue);
 }
 
 function normalizeBudgetSubcategory(input: Partial<BudgetSubcategory>, fallbackIndex: number): BudgetSubcategory {
@@ -902,7 +977,12 @@ function loadStoredTransactions(): Transaction[] {
     return initialTransactions;
   }
 
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return initialTransactions;
+  }
   if (!raw) {
     return initialTransactions;
   }
@@ -925,13 +1005,16 @@ function loadStoredTransactions(): Transaction[] {
 }
 
 function loadStoredTransactionOrder() {
-  const raw = window.localStorage.getItem(ORDER_STORAGE_KEY);
-  if (!raw) {
+  try {
+    const raw = window.localStorage.getItem(ORDER_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = safeJsonParse<unknown>(raw, []);
+    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
+  } catch {
     return [];
   }
-
-  const parsed = safeJsonParse<unknown>(raw, []);
-  return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
 }
 
 function mergeDuplicateCategories(categories: BudgetCategory[]): BudgetCategory[] {
@@ -1054,68 +1137,14 @@ function loadStoredBudgetCategories(): BudgetCategory[] {
 }
 
 function loadStoredAssets(): Asset[] {
-  const loadedAssets = loadStoredValue<Asset[]>(ASSET_STORAGE_KEY, initialAssets);
-
-  return Array.isArray(loadedAssets) && loadedAssets.length > 0 ? loadedAssets : initialAssets;
-}
-
-function parseItalianDate(dateInput: any): string {
-  if (!dateInput) return '';
-  if (dateInput instanceof Date || Object.prototype.toString.call(dateInput) === '[object Date]') {
-    const yyyy = dateInput.getFullYear();
-    const mm = String(dateInput.getMonth() + 1).padStart(2, '0');
-    const dd = String(dateInput.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
-  const strVal = String(dateInput).trim();
-
-  // Handle Excel serial date numbers (e.g., 44363 or "44363.87" representing 16/06/2021)
-  const num = Number(strVal);
-  if (!isNaN(num) && num >= 20000 && num < 100000) {
-    // Excel serial date starting point is 1899-12-30
-    const dateNum = Math.floor(num);
-    const date = new Date((dateNum - 25569) * 86400 * 1000);
-    if (Number.isFinite(date.getTime())) {
-      const yyyy = date.getFullYear();
-      const mm = String(date.getMonth() + 1).padStart(2, '0');
-      const dd = String(date.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
+  try {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(ASSET_STORAGE_KEY) : null;
+    if (raw !== null) {
+      const parsed = safeJsonParse<Asset[]>(raw, initialAssets);
+      if (Array.isArray(parsed)) return parsed;
     }
-  }
-
-  const clean = strVal;
-
-  // Try DD/MM/YY or DD/MM/YYYY
-  const dmyMatch = clean.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})/);
-  if (dmyMatch) {
-    let day = dmyMatch[1].padStart(2, '0');
-    let month = dmyMatch[2].padStart(2, '0');
-    let yearStr = dmyMatch[3];
-    let year = parseInt(yearStr, 10);
-    if (yearStr.length === 2) {
-      year = 2000 + year; // assume 20xx
-    }
-    return `${year}-${month}-${day}`;
-  }
-
-  // Fallback to ISO format if it's already YYYY-MM-DD
-  const isoMatch = clean.match(/^(\d{4})[\/\.-](\d{1,2})[\/\.-](\d{1,2})/);
-  if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
-  }
-
-  // Fallback to JavaScript Date.parse if it can understand it
-  const parsedTime = Date.parse(clean);
-  if (!isNaN(parsedTime)) {
-    const date = new Date(parsedTime);
-    const yyyy = date.getFullYear();
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const dd = String(date.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  }
-
-  return clean;
+  } catch {}
+  return initialAssets;
 }
 
 function formatDateToItalian(dateStr: string): string {
@@ -1127,613 +1156,6 @@ function formatDateToItalian(dateStr: string): string {
     return `${day}/${month}/${year}`;
   }
   return dateStr;
-}
-
-function cleanAndParseAmount(val: any): number {
-  if (val === undefined || val === null) return 0;
-  if (typeof val === 'number') {
-    return Math.abs(val);
-  }
-  const str = String(val).replace(/[\s€]/g, '').replace(',', '.').trim();
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : Math.abs(num);
-}
-
-function normalizeHeader(header: string) {
-  const value = header
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^a-z0-9]+/g, '');
-
-  const aliases: Record<string, string> = {
-    id: 'id',
-    date: 'date',
-    data: 'date',
-    merchant: 'merchant',
-    esercente: 'merchant',
-    beneficiario: 'merchant',
-    category: 'category',
-    categoria: 'category',
-    subcategory: 'subcategory',
-    sottocategoria: 'subcategory',
-    sottocategorie: 'subcategory',
-    account: 'account',
-    conto: 'account',
-    amount: 'amount',
-    importo: 'amount',
-    kind: 'kind',
-    tipo: 'kind',
-    note: 'note',
-    nota: 'note',
-    createdat: 'createdAt',
-    creatoil: 'createdAt',
-    valuta: 'valuta',
-    prelievo: 'prelievo',
-    deposito: 'deposito',
-  };
-
-  return aliases[value] ?? value;
-}
-
-function splitCsvLine(line: string, delimiter: string) {
-  const result: string[] = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const character = line[index];
-
-    if (character === '"') {
-      const nextCharacter = line[index + 1];
-
-      if (inQuotes && nextCharacter === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-
-      continue;
-    }
-
-    if (character === delimiter && !inQuotes) {
-      result.push(current.trim());
-      current = '';
-      continue;
-    }
-
-    current += character;
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function detectDelimiter(headerLine: string) {
-  const semicolonCount = (headerLine.match(/;/g) ?? []).length;
-  const commaCount = (headerLine.match(/,/g) ?? []).length;
-
-  return semicolonCount > commaCount ? ';' : ',';
-}
-
-function parseTransactionKind(value: string, amount: number) {
-  const normalized = value.trim().toLowerCase();
-
-  if (['income', 'entrata', 'entrate', 'incasso', 'credit', 'deposito'].includes(normalized)) {
-    return 'income' as const;
-  }
-
-  if (['expense', 'uscita', 'uscite', 'spesa', 'debit', 'prelievo'].includes(normalized)) {
-    return 'expense' as const;
-  }
-
-  return amount >= 0 ? 'income' : 'expense';
-}
-
-function normalizeImportedTransaction(input: Record<string, any>): Transaction | null {
-  const merchant = String(input.merchant ?? '').trim();
-  const category = String(input.category ?? '').trim();
-  const subcategory = String(input.subcategory ?? '').trim();
-  const account = String(input.account ?? '').trim();
-  const dateVal = input.date;
-  const note = String(input.note ?? '').trim();
-
-  if (!merchant || !account || !dateVal) {
-    return null;
-  }
-
-  const date = parseItalianDate(dateVal);
-
-  const prelievoStr = input.prelievo !== undefined ? String(input.prelievo).trim() : '';
-  const depositoStr = input.deposito !== undefined ? String(input.deposito).trim() : '';
-  const hasPrelievo = prelievoStr !== '';
-  const hasDeposito = depositoStr !== '';
-
-  let amount = 0;
-  let kind: TransactionKind = 'expense';
-
-  if (hasDeposito && cleanAndParseAmount(depositoStr) > 0) {
-    amount = cleanAndParseAmount(depositoStr);
-    kind = 'income';
-  } else if (hasPrelievo && cleanAndParseAmount(prelievoStr) > 0) {
-    amount = -cleanAndParseAmount(prelievoStr);
-    kind = 'expense';
-  } else {
-    // Check 'tipo' or 'kind' value
-    const tipoText = String(input.kind ?? '').trim().toLowerCase();
-    const parsedAmount = Number(String(input.amount ?? '').replace(',', '.'));
-    
-    if (tipoText === 'deposito') {
-      amount = Number.isFinite(parsedAmount) ? Math.abs(parsedAmount) : 0;
-      kind = 'income';
-    } else if (tipoText === 'prelievo') {
-      amount = Number.isFinite(parsedAmount) ? -Math.abs(parsedAmount) : 0;
-      kind = 'expense';
-    } else if (Number.isFinite(parsedAmount)) {
-      kind = parseTransactionKind(tipoText, parsedAmount);
-      amount = Math.abs(parsedAmount) * (kind === 'expense' ? -1 : 1);
-    } else {
-      return null;
-    }
-  }
-
-  const createdAt = input.createdAt ? Number(input.createdAt) : Date.now();
-  const finalCategory = category || (kind === 'income' ? 'Entrate' : 'Altro');
-
-  return {
-    id: String(input.id ?? '').trim() || createTransactionId(),
-    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
-    date,
-    merchant,
-    category: finalCategory,
-    subcategory,
-    account,
-    amount,
-    kind,
-    note,
-  };
-}
-
-function parseRaiffeisenRow(row: Record<string, any>): Transaction | null {
-  const findValue = (possibleKeys: string[]) => {
-    for (const pk of possibleKeys) {
-      for (const key of Object.keys(row)) {
-        const normalizedKey = key.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]+/g, '');
-        if (normalizedKey === pk || normalizedKey.includes(pk) || pk.includes(normalizedKey)) {
-          if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
-            return row[key];
-          }
-        }
-      }
-    }
-    return undefined;
-  };
-
-  const rawDate = findValue(['valutabeneficiario', 'valutabenefici', 'valutabenefi', 'valutabenef', 'valuta', 'datacontabi', 'datacontabile', 'data']);
-  const rawDare = findValue(['dare']);
-  const rawAvere = findValue(['avere']);
-  const rawDescrizione = findValue(['descrizione', 'causale']);
-  const rawCausale = findValue(['causale']);
-  const rawNote = findValue(['note', 'nota']);
-
-  if (!rawDate) return null;
-
-  const date = parseItalianDate(rawDate);
-  if (!date) return null;
-
-  const merchant = String(rawDescrizione || rawCausale || 'Raiffeisen Transaction').trim();
-  const noteParts: string[] = [];
-  if (rawCausale) noteParts.push(`Causale: ${rawCausale}`);
-  if (rawNote) noteParts.push(String(rawNote));
-  const note = noteParts.join(' - ').trim();
-
-  const parseNum = (val: any): number => {
-    if (val === undefined || val === null || val === '') return 0;
-    if (typeof val === 'number') return val;
-    let str = String(val).trim();
-    if (str.includes('.') && str.includes(',')) {
-      if (str.indexOf('.') < str.indexOf(',')) {
-        str = str.replace(/\./g, '').replace(/,/g, '.');
-      } else {
-        str = str.replace(/,/g, '').replace(/\./g, '.');
-      }
-    } else if (str.includes(',')) {
-      str = str.replace(/,/g, '.');
-    }
-    const parsed = parseFloat(str);
-    return isNaN(parsed) ? 0 : parsed;
-  };
-
-  const dareVal = parseNum(rawDare);
-  const avereVal = parseNum(rawAvere);
-
-  let amount = 0;
-  let kind: TransactionKind = 'expense';
-
-  if (avereVal !== 0) {
-    amount = Math.abs(avereVal);
-    kind = 'income';
-  } else if (dareVal !== 0) {
-    amount = -Math.abs(dareVal);
-    kind = 'expense';
-  } else {
-    return null;
-  }
-
-  return {
-    id: createTransactionId(),
-    createdAt: Date.now(),
-    date,
-    merchant,
-    category: kind === 'income' ? 'Entrate' : 'Altro',
-    subcategory: '',
-    account: 'Raiffeisen',
-    amount,
-    kind,
-    note,
-  };
-}
-
-function parseNexiRow(row: Record<string, any>): Transaction | null {
-  const findValue = (possibleKeys: string[]) => {
-    for (const key of Object.keys(row)) {
-      const normalizedKey = key.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]+/g, '');
-      if (possibleKeys.some(pk => normalizedKey.includes(pk))) {
-        return row[key];
-      }
-    }
-    return undefined;
-  };
-
-  const rawDate = findValue(['data']);
-  const rawDescrizione = findValue(['descrizione']);
-  const rawCategorie = findValue(['categorie', 'categoria']);
-  const rawAmount = findValue(['importocambio', 'importo', 'amount']);
-  const rawRiferimento = findValue(['riferimento']);
-  const rawStato = findValue(['stato']);
-  const rawCommNexi = findValue(['commissionenexi']);
-  const rawCommCircuiti = findValue(['commissionecircuiti']);
-
-  if (!rawDate) return null;
-
-  const date = parseItalianDate(rawDate);
-  if (!date) return null;
-
-  const merchant = String(rawDescrizione || 'Nexi Transaction').trim();
-  const category = String(rawCategorie || 'Altro').trim();
-
-  const parseNum = (val: any): number => {
-    if (val === undefined || val === null || val === '') return 0;
-    if (typeof val === 'number') return val;
-    let str = String(val).trim();
-    if (str.includes('.') && str.includes(',')) {
-      if (str.indexOf('.') < str.indexOf(',')) {
-        str = str.replace(/\./g, '').replace(/,/g, '.');
-      } else {
-        str = str.replace(/,/g, '').replace(/\./g, '.');
-      }
-    } else if (str.includes(',')) {
-      str = str.replace(/,/g, '.');
-    }
-    const parsed = parseFloat(str);
-    return isNaN(parsed) ? 0 : parsed;
-  };
-
-  const parsedAmount = parseNum(rawAmount);
-  if (parsedAmount === 0) return null;
-
-  // Nexi is a credit card statement, positive numbers represent charges (expenses)
-  let amount = -Math.abs(parsedAmount);
-  let kind: TransactionKind = 'expense';
-
-  // If parsedAmount is negative, it's a refund (income)
-  if (parsedAmount < 0) {
-    amount = Math.abs(parsedAmount);
-    kind = 'income';
-  }
-
-  const noteParts: string[] = [];
-  if (rawRiferimento) noteParts.push(`Rif: ${rawRiferimento}`);
-  if (rawStato) noteParts.push(`Stato: ${rawStato}`);
-  
-  const commNexi = parseNum(rawCommNexi);
-  const commCirc = parseNum(rawCommCircuiti);
-  if (commNexi > 0) noteParts.push(`Comm. Nexi: €${commNexi.toFixed(2)}`);
-  if (commCirc > 0) noteParts.push(`Comm. Circuiti: €${commCirc.toFixed(2)}`);
-
-  const note = noteParts.join(' - ').trim();
-
-  return {
-    id: createTransactionId(),
-    createdAt: Date.now(),
-    date,
-    merchant,
-    category,
-    subcategory: '',
-    account: 'Nexi',
-    amount,
-    kind,
-    note,
-  };
-}
-
-function parseFileRows(rows: Record<string, any>[], format: 'template' | 'raiffeisen' | 'nexi') {
-  const transactions: Transaction[] = [];
-  let skipped = 0;
-
-  rows.forEach((row) => {
-    let importedTransaction: Transaction | null = null;
-    if (format === 'raiffeisen') {
-      importedTransaction = parseRaiffeisenRow(row);
-    } else if (format === 'nexi') {
-      importedTransaction = parseNexiRow(row);
-    } else {
-      // template
-      const normalizedRow: Record<string, any> = Object.create(null);
-      Object.keys(row).forEach((key) => {
-        const normKey = normalizeHeader(key);
-        if (normKey !== '__proto__' && normKey !== 'constructor' && normKey !== 'prototype') {
-          normalizedRow[normKey] = row[key];
-        }
-      });
-      importedTransaction = normalizeImportedTransaction(normalizedRow);
-    }
-
-    if (importedTransaction) {
-      transactions.push(importedTransaction);
-    } else {
-      skipped += 1;
-    }
-  });
-
-  return { transactions, skipped };
-}
-
-function parseTransactionsCsv(csvText: string, format: 'template' | 'raiffeisen' | 'nexi' = 'template') {
-  const normalizedText = csvText.replace(/\r\n/g, '\n').trim();
-
-  if (!normalizedText) {
-    return { transactions: [] as Transaction[], skipped: 0 };
-  }
-
-  const lines = normalizedText.split('\n').filter(Boolean);
-
-  if (!lines.length) {
-    return { transactions: [] as Transaction[], skipped: 0 };
-  }
-
-  const delimiter = detectDelimiter(lines[0]);
-  const rawHeaders = splitCsvLine(lines[0], delimiter);
-  const headers = format === 'template'
-    ? rawHeaders.map(normalizeHeader)
-    : rawHeaders.map(h => h.trim());
-
-  const rows = lines.slice(1);
-
-  const parsedRows: Record<string, any>[] = [];
-
-  rows.forEach((rowLine) => {
-    const cells = splitCsvLine(rowLine, delimiter);
-    const record: Record<string, string> = {};
-
-    headers.forEach((header, index) => {
-      record[header] = cells[index] ?? '';
-    });
-    parsedRows.push(record);
-  });
-
-  return parseFileRows(parsedRows, format);
-}
-
-function parseTransactionsWorkbook(arrayBuffer: ArrayBuffer, format: 'template' | 'raiffeisen' | 'nexi' = 'template') {
-  const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-
-  if (!sheetName) {
-    return { transactions: [] as Transaction[], skipped: 0 };
-  }
-
-  const sheet = workbook.Sheets[sheetName];
-
-  if (!sheet) {
-    return { transactions: [] as Transaction[], skipped: 0 };
-  }
-
-  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
-  return parseFileRows(rows, format);
-}
-
-function parseAssetsFromWorkbook(arrayBuffer: ArrayBuffer) {
-  const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
-  
-  const assetsSheetName = workbook.SheetNames.find(name => {
-    const n = name.trim().toLowerCase();
-    return n === 'asset' || n === 'assets' || n === 'attività' || n === 'attivita';
-  });
-
-  const importedAssets: Asset[] = [];
-  const importedAssetTxs: AssetTransaction[] = [];
-
-  if (!assetsSheetName) {
-    return { assets: importedAssets, assetTransactions: importedAssetTxs };
-  }
-
-  const sheet = workbook.Sheets[assetsSheetName];
-  if (!sheet) {
-    return { assets: importedAssets, assetTransactions: importedAssetTxs };
-  }
-
-  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
-  
-  const cleanNum = (val: any) => {
-    if (val === undefined || val === null || val === '') return 0;
-    const str = String(val).replace(/[^0-9\.,-]/g, '').replace(',', '.');
-    return parseFloat(str) || 0;
-  };
-
-  rows.forEach((row) => {
-    const normalizedRow: Record<string, any> = Object.create(null);
-    Object.keys(row).forEach((key) => {
-      const cleanKey = key.trim().toLowerCase()
-        .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      if (cleanKey !== '__proto__' && cleanKey !== 'constructor' && cleanKey !== 'prototype') {
-        normalizedRow[cleanKey] = row[key];
-      }
-    });
-
-    const name = String(normalizedRow['nome'] || normalizedRow['name'] || '').trim();
-    if (!name) return;
-
-    const rawKind = String(normalizedRow['tipo'] || normalizedRow['kind'] || normalizedRow['type'] || '').toLowerCase();
-    const ticker = String(normalizedRow['ticker'] || '').trim().toUpperCase();
-    let kind: AssetKind = 'altro';
-    let etfSubtype: 'azionario' | 'obbligazionario' | undefined = undefined;
-
-    if (rawKind.includes('etf')) {
-      const isBond = rawKind.includes('obbligaz') || rawKind.includes('bond') || /bond|obbligaz|treasury|bpt|bund|fixed income/i.test(`${name} ${ticker}`);
-      kind = isBond ? 'etf_obbligazionario' : 'etf_azionario';
-      etfSubtype = isBond ? 'obbligazionario' : 'azionario';
-    } else if (rawKind.includes('azion')) {
-      kind = 'azioni';
-    } else if (rawKind.includes('obbligazion')) {
-      kind = 'obbligazioni';
-    } else if (rawKind.includes('liquidit')) {
-      kind = 'liquidita';
-    } else if (rawKind.includes('fond')) {
-      kind = 'fondo';
-    } else if (rawKind.includes('cripto') || rawKind.includes('crypto')) {
-      kind = 'cripto';
-    }
-
-    const institution = String(normalizedRow['istituto'] || normalizedRow['institution'] || '').trim();
-    const quantity = cleanNum(normalizedRow['quantita'] || normalizedRow['quantity']);
-    const unitValue = cleanNum(normalizedRow['valore unitario'] || normalizedRow['valore_unitario'] || normalizedRow['unit value'] || normalizedRow['unit_value'] || normalizedRow['prezzo'] || normalizedRow['price']);
-    const note = String(normalizedRow['note'] || normalizedRow['notes'] || '').trim();
-
-    const asset: Asset = {
-      id: 'asset-' + Math.random().toString(36).substr(2, 9),
-      name,
-      kind,
-      institution,
-      quantity,
-      unitValue,
-      note,
-      ticker: ticker || undefined,
-      etfSubtype,
-      createdAt: Date.now()
-    };
-
-    importedAssets.push(asset);
-  });
-
-  importedAssets.forEach((asset) => {
-    const assetSheetName = workbook.SheetNames.find(name => {
-      const n = name.trim().toLowerCase();
-      const assetName = asset.name.toLowerCase();
-      const assetTicker = asset.ticker ? asset.ticker.toLowerCase() : '';
-      return n === assetName || (assetTicker && n === assetTicker);
-    });
-
-    if (assetSheetName) {
-      const assetSheet = workbook.Sheets[assetSheetName];
-      if (assetSheet) {
-        const txRows = XLSX.utils.sheet_to_json<Record<string, any>>(assetSheet, { defval: '' });
-        txRows.forEach((row) => {
-          const normRow: Record<string, any> = Object.create(null);
-          Object.keys(row).forEach((k) => {
-            const cleanK = k.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (cleanK !== '__proto__' && cleanK !== 'constructor' && cleanK !== 'prototype') {
-              normRow[cleanK] = row[k];
-            }
-          });
-
-          const rawDate = normRow['data'] || normRow['date'];
-          const parsedDate = parseItalianDate(rawDate);
-          
-          const rawAzioni = normRow['azioni'] || normRow['shares'] || normRow['quantita'] || normRow['quantity'];
-          const qtyVal = cleanNum(rawAzioni);
-          if (qtyVal === 0) return;
-
-          const rawPrezzo = normRow['prezzo'] || normRow['price'] || normRow['valore unitario'];
-          const priceVal = cleanNum(rawPrezzo);
-
-          const rawComm = normRow['commissioni'] || normRow['commissione'] || normRow['fees'] || normRow['fee'] || normRow['commission'];
-          const commVal = cleanNum(rawComm);
-
-          let finalNote = '';
-          if (commVal > 0) {
-            finalNote = `Commissioni: ${commVal.toFixed(2)} €`;
-          }
-
-          const tx: AssetTransaction = {
-            id: 'asset-tx-' + Math.random().toString(36).substr(2, 9),
-            assetId: asset.id,
-            date: parsedDate || new Date().toISOString().split('T')[0],
-            kind: qtyVal >= 0 ? 'buy' : 'sell',
-            quantity: Math.abs(qtyVal),
-            unitValue: priceVal,
-            note: finalNote,
-            createdAt: Date.now()
-          };
-
-          importedAssetTxs.push(tx);
-        });
-      }
-    }
-  });
-
-  return { assets: importedAssets, assetTransactions: importedAssetTxs };
-}
-
-function buildTransactionsCsv(transactions: Transaction[]) {
-  const headers = [
-    'Data',
-    'Tipo',
-    'Conto',
-    'Beneficiario',
-    'Valuta',
-    'Categoria',
-    'Sotto-Categoria',
-    'Note',
-    'Prelievo',
-    'Deposito'
-  ];
-
-  const escapeCell = (value: string | number) => {
-    let text = String(value ?? '');
-
-    // Prevent CSV Formula Injection (CWE-1236):
-    if (/^[=+\-@\t\r]/.test(text)) {
-      text = `'${text}`;
-    }
-
-    if (/[";\n,]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
-    }
-
-    return text;
-  };
-
-  const rows = transactions.map((transaction) => {
-    const isIncome = transaction.kind === 'income';
-    const amountVal = Math.abs(transaction.amount);
-    return [
-      formatDateToItalian(transaction.date),
-      isIncome ? 'Deposito' : 'Prelievo',
-      transaction.account,
-      transaction.merchant,
-      'EUR',
-      transaction.category,
-      transaction.subcategory,
-      transaction.note,
-      !isIncome ? amountVal.toFixed(2) : '',
-      isIncome ? amountVal.toFixed(2) : '',
-    ];
-  });
-
-  return [headers.join(';'), ...rows.map((row) => row.map(escapeCell).join(';'))].join('\n');
 }
 
 function sanitizeFormulaInjection(value: string | number | undefined): string | number {
@@ -2735,6 +2157,29 @@ function App() {
     }
   });
 
+  // Floating in-app notification banner toast
+  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
+
+  useEffect(() => {
+    const handleNotificationReceived = (e: Event) => {
+      const customEvent = e as CustomEvent<AppNotification>;
+      if (customEvent && customEvent.detail) {
+        setActiveToast(customEvent.detail);
+      }
+    };
+    window.addEventListener('app-notification-received', handleNotificationReceived);
+    return () => window.removeEventListener('app-notification-received', handleNotificationReceived);
+  }, []);
+
+  // Auto-dismiss in-app notification toast after 6 seconds
+  useEffect(() => {
+    if (!activeToast) return;
+    const timer = setTimeout(() => {
+      setActiveToast(null);
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [activeToast]);
+
   useEffect(() => {
     try {
       localStorage.setItem('app-theme', theme);
@@ -2769,14 +2214,19 @@ function App() {
     } catch {}
   }, [bgEffect]);
 
-  const [platform, setPlatform] = useState('macOS');
-  const [dataFileInfo, setDataFileInfo] = useState<{
-    filePath: string;
-    exists: boolean;
-    size: number;
-    lastModified: number;
-    candidates: string[];
-  } | null>(null);
+  const [platform, setPlatform] = useState<string>('macOS');
+  const [dataFileInfo, setDataFileInfo] = useState<DataFileInfo | null>(() => {
+    try {
+      const raw = localStorage.getItem(LINKED_FILE_INFO_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.filePath === 'string') {
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  });
   const [activeSection, setActiveSection] = useState<SectionId>('dashboard');
   const [statusMessage, setStatusMessage] = useState('Pronto. Seleziona una sezione o crea una nuova operazione.');
   const [customLogo, setCustomLogo] = useState<string | null>(() => {
@@ -2786,30 +2236,6 @@ function App() {
       return null;
     }
   });
-  const logoFileInputRef = useRef<HTMLInputElement | null>(null);
-
-  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setStatusMessage('Errore: seleziona un file immagine valido (PNG, JPG, SVG, WebP).');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      if (dataUrl) {
-        setCustomLogo(dataUrl);
-        try {
-          localStorage.setItem('budget_custom_brand_logo', dataUrl);
-          setStatusMessage('Logo personalizzato caricato e salvato con successo!');
-        } catch {
-          setStatusMessage('Logo applicato per la sessione corrente.');
-        }
-      }
-    };
-    reader.readAsDataURL(file);
-  };
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
@@ -2834,7 +2260,6 @@ function App() {
     history: { date: string; price: number }[];
   }>>({});
   const [isFetchingTickers, setIsFetchingTickers] = useState(false);
-  const [tickerError, setTickerError] = useState<string | null>(null);
 
   // GitHub Auto-Update State
   const normalizeGithubRepo = useCallback((raw?: string | null): string => {
@@ -2885,6 +2310,7 @@ function App() {
   });
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
   const [showUpdateModal, setShowUpdateModal] = useState<boolean>(false);
+  const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
   const [updateStatus, setUpdateStatus] = useState<'prompt' | 'downloading' | 'installing' | 'completed' | 'error'>('prompt');
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress>({ percent: 0, transferred: 0, total: 0 });
   const [updateErrorMessage, setUpdateErrorMessage] = useState<string | null>(null);
@@ -2933,7 +2359,7 @@ function App() {
         }
         result = await response.json();
       } else {
-        // Direct GitHub API check for standalone iOS WKWebView (file://)
+        // Direct GitHub API check fallback (file://)
         const headers: Record<string, string> = {
           Accept: 'application/vnd.github.v3+json',
         };
@@ -2946,6 +2372,7 @@ function App() {
             updateAvailable: false,
             currentVersion: APP_VERSION,
             latestVersion: APP_VERSION,
+            repo,
           };
         } else {
           const list = await ghRes.json();
@@ -2958,6 +2385,7 @@ function App() {
             releaseName: first?.name,
             releaseNotes: first?.body,
             htmlUrl: first?.html_url || `https://github.com/${repo}/releases`,
+            repo,
           };
         }
       }
@@ -3130,7 +2558,6 @@ function App() {
     if (assetsWithTickers.length === 0) return;
 
     setIsFetchingTickers(true);
-    setTickerError(null);
     let updatedCount = 0;
     
     const nextTickerData = { ...tickerDataRef.current };
@@ -3222,7 +2649,6 @@ function App() {
     start: getMonthStartIso(),
     end: getTodayIso(),
   }));
-  const [confirmDeleteAssetId, setConfirmDeleteAssetId] = useState<string | null>(null);
   const [showNetWorthExplanation, setShowNetWorthExplanation] = useState<boolean>(false);
 
   // Global Confirmation Modal State for all deletions across the app
@@ -3288,6 +2714,7 @@ function App() {
   const [assetSearch, setAssetSearch] = useState('');
   const [assetSortBy, setAssetSortBy] = useState<string>('value');
   const [assetSortOrder, setAssetSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [assetViewMode, setAssetViewMode] = useState<'table' | 'cards'>('table');
   const [hoveredSlice, setHoveredSlice] = useState<{ name: string; spent: number; percent: number; color: string; isSub: boolean } | null>(null);
   const [hideNumbers, setHideNumbers] = useState<boolean>(() => loadStoredValue<boolean>(HIDE_NUMBERS_STORAGE_KEY, false));
 
@@ -3323,9 +2750,7 @@ function App() {
   });
   const [assetChartMode, setAssetChartMode] = useState<'capital' | 'price' | 'return'>('capital');
   const [portfolioChartMode, setPortfolioChartMode] = useState<'total' | 'no-transactions'>('total');
-  const [reportViewMode, setReportViewMode] = useState<'charts' | 'sankey'>('charts');
-  const [netWorthViewMode, setNetWorthViewMode] = useState<'history' | 'allocation' | 'fire'>('history');
-  const [unifiedReportTab, setUnifiedReportTab] = useState<'patrimonio' | 'flussi' | 'trend' | 'sankey' | 'allocation' | 'fire'>('patrimonio');
+  const [unifiedReportTab, setUnifiedReportTab] = useState<'patrimonio' | 'flussi' | 'allocation' | 'fire'>('patrimonio');
   const [recurringViewMode, setRecurringViewMode] = useState<'scadenziario' | 'recurring' | 'pac' | 'cashback'>('scadenziario');
   const [scadenziarioHorizon, setScadenziarioHorizon] = useState<'month' | '30d' | '60d' | '90d'>('month');
   const [scadenziarioTypeFilter, setScadenziarioTypeFilter] = useState<'all' | 'expense' | 'income' | 'pac'>('all');
@@ -3601,67 +3026,49 @@ function App() {
       setAutoCheckUpdates(fileData.autoCheckUpdates);
     }
 
+    if (fileData._fileMeta && typeof fileData._fileMeta === 'object' && !window.budgetApp) {
+      const meta = fileData._fileMeta;
+      const fileName = meta.fileName || 'user-data.json';
+      const fullPath = meta.macFilePath || meta.filePath || `iCloud Drive / ${fileName}`;
+      const displayLocation = meta.displayLocation || `☁️ iCloud Drive / ${fileName}`;
+      const folderPath = meta.folderPath || 'iCloud Drive';
+      const isICloud = meta.isICloud !== undefined ? Boolean(meta.isICloud) : true;
+      const updatedInfo: DataFileInfo = {
+        filePath: fullPath,
+        fileName,
+        folderPath,
+        displayLocation,
+        isICloud,
+        isCustomPrimary: true,
+        iCloudAvailable: true,
+        iCloudDefaultPath: fullPath,
+        exists: true,
+        size: JSON.stringify(fileData).length,
+        lastModified: meta.updatedAt ? new Date(meta.updatedAt).getTime() || Date.now() : Date.now(),
+        candidates: [fullPath],
+      };
+      setDataFileInfo(updatedInfo);
+      try {
+        localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(updatedInfo));
+      } catch {}
+      saveToPersistentIdb(LINKED_FILE_INFO_STORAGE_KEY, updatedInfo);
+    }
+
     setStatusMessage(`Dati e configurazione completa ripristinati con successo da ${sourceDesc} (${restoredCount} movimenti riconosciuti).`);
     return true;
-  }, []);
+  }, [normalizeGithubRepo]);
 
-  const refreshDataFileInfo = useCallback(async () => {
-    if (window.budgetApp && typeof window.budgetApp.getDataFileInfo === 'function') {
-      try {
-        const info = await window.budgetApp.getDataFileInfo();
-        setDataFileInfo(info);
-      } catch (err) {
-        console.error('Errore durante il recupero informazioni file dati:', err);
-      }
-    }
-  }, []);
+  const buildCurrentFullDataPayload = useCallback(() => {
+    const activeName = dataFileInfo?.fileName || 'user-data.json';
+    const activePath =
+      dataFileInfo?.filePath || '~/Documents/BudgetingMacApp/user-data.json';
+    const activeDisplayLoc =
+      dataFileInfo?.displayLocation || `📄 Documenti Mac / BudgetingMacApp / ${activeName}`;
+    const activeFolder =
+      dataFileInfo?.folderPath ||
+      (activePath.includes('/') ? activePath.slice(0, activePath.lastIndexOf('/')) : 'iCloud Drive');
 
-  const handleSelectDataFile = useCallback(async () => {
-    if (!window.budgetApp || typeof window.budgetApp.selectDataFile !== 'function') return;
-    try {
-      const res = await window.budgetApp.selectDataFile();
-      if (res.success && res.data) {
-        applyFullUserData(res.data, res.filePath || 'file selezionato');
-        await refreshDataFileInfo();
-      } else if (res.error) {
-        setStatusMessage(`Errore: ${res.error}`);
-      }
-    } catch (err: any) {
-      setStatusMessage(`Errore selezione file: ${err?.message || 'operazione annullata'}`);
-    }
-  }, [applyFullUserData, refreshDataFileInfo]);
-
-  const handleOpenDataFolder = useCallback(async () => {
-    if (window.budgetApp && typeof window.budgetApp.openDataFolder === 'function') {
-      await window.budgetApp.openDataFolder();
-    }
-  }, []);
-
-  const userDataJsonInputRef = useRef<HTMLInputElement | null>(null);
-
-  const handleImportUserDataJsonClick = useCallback(() => {
-    if (userDataJsonInputRef.current) {
-      userDataJsonInputRef.current.click();
-    }
-  }, []);
-
-  const handleImportUserDataJsonFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      applyFullUserData(parsed, file.name);
-      await refreshDataFileInfo();
-    } catch (err: any) {
-      setStatusMessage(`Impossibile leggere il file: ${err?.message || 'formato non valido'}`);
-    } finally {
-      if (e.target) e.target.value = '';
-    }
-  }, [applyFullUserData, refreshDataFileInfo]);
-
-  const handleExportUserDataJson = useCallback(() => {
-    const dataToExport = {
+    return {
       transactions,
       transactionOrder,
       budgetCategories,
@@ -3684,18 +3091,18 @@ function App() {
       githubToken,
       autoCheckUpdates,
       exportedAt: new Date().toISOString(),
+      _fileMeta: {
+        fileName: activeName,
+        macFilePath: activePath,
+        folderPath: activeFolder,
+        displayLocation: activeDisplayLoc,
+        isICloud: dataFileInfo?.isICloud !== undefined ? dataFileInfo.isICloud : true,
+        updatedAt: new Date().toISOString(),
+      },
     };
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'user-data.json';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    setStatusMessage('Backup completo esportato con successo in "user-data.json".');
   }, [
+    dataFileInfo,
+    platform,
     transactions,
     transactionOrder,
     budgetCategories,
@@ -3719,13 +3126,219 @@ function App() {
     autoCheckUpdates,
   ]);
 
-  useEffect(() => {
-    window.budgetApp?.ping().then((result) => {
-      if (result?.platform) {
-        setPlatform(result.platform);
+  const refreshDataFileInfo = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.getDataFileInfo === 'function') {
+      try {
+        const info = await window.budgetApp.getDataFileInfo();
+        setDataFileInfo(info);
+        try {
+          localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(info));
+        } catch {}
+        saveToPersistentIdb(LINKED_FILE_INFO_STORAGE_KEY, info);
+      } catch (err) {
+        console.error('Errore durante il recupero informazioni file dati:', err);
       }
-      refreshDataFileInfo();
-    });
+    }
+  }, []);
+
+  const handleSelectDataFile = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.selectDataFile === 'function') {
+      try {
+        const res = await window.budgetApp.selectDataFile();
+        if (res.success && res.data) {
+          applyFullUserData(res.data, res.displayLocation || res.filePath || 'file selezionato');
+          await refreshDataFileInfo();
+          setStatusMessage(
+            `File principale collegato e bloccato: ${res.displayLocation || res.filePath}. Rimarrà questa la posizione principale.`
+          );
+        } else if (res.error) {
+          setStatusMessage(`Errore: ${res.error}`);
+        }
+      } catch (err: any) {
+        setStatusMessage(`Errore selezione file: ${err?.message || 'operazione annullata'}`);
+      }
+    } else if (userDataJsonInputRef.current) {
+      userDataJsonInputRef.current.click();
+    }
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  const handleChooseSaveDataLocation = useCallback(
+    async (startInICloud = false) => {
+      if (window.budgetApp && typeof window.budgetApp.chooseSaveDataLocation === 'function') {
+        try {
+          const payload = buildCurrentFullDataPayload();
+          const res = await window.budgetApp.chooseSaveDataLocation(payload, startInICloud);
+          if (res.success && res.filePath) {
+            if (res.data) {
+              applyFullUserData(res.data, res.displayLocation || res.filePath);
+            }
+            await refreshDataFileInfo();
+            setStatusMessage(
+              `Nuova posizione principale impostata e bloccata: ${res.displayLocation || res.filePath}`
+            );
+          } else if (res.error) {
+            setStatusMessage(`Errore salvataggio posizione: ${res.error}`);
+          }
+        } catch (err: any) {
+          setStatusMessage(`Errore scelta posizione: ${err?.message || 'operazione annullata'}`);
+        }
+      } else if (userDataJsonInputRef.current) {
+        userDataJsonInputRef.current.click();
+      }
+    },
+    [buildCurrentFullDataPayload, applyFullUserData, refreshDataFileInfo]
+  );
+
+  const handleUseICloudDataLocation = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.useICloudDataLocation === 'function') {
+      try {
+        const payload = buildCurrentFullDataPayload();
+        const res = await window.budgetApp.useICloudDataLocation(payload);
+        if (res.success && res.filePath) {
+          if (res.data) {
+            applyFullUserData(res.data, res.displayLocation || res.filePath);
+          }
+          await refreshDataFileInfo();
+          setStatusMessage(
+            `Posizione principale impostata su iCloud Drive: ${res.displayLocation || res.filePath}`
+          );
+        } else if (res.error) {
+          setStatusMessage(`Attenzione: ${res.error}`);
+        }
+      } catch (err: any) {
+        setStatusMessage(`Errore configurazione iCloud Drive: ${err?.message || 'errore'}`);
+      }
+    } else if (userDataJsonInputRef.current) {
+      userDataJsonInputRef.current.click();
+    }
+  }, [buildCurrentFullDataPayload, applyFullUserData, refreshDataFileInfo]);
+
+  const handleOpenDataFolder = useCallback(async () => {
+    if (window.budgetApp && typeof window.budgetApp.openDataFolder === 'function') {
+      await window.budgetApp.openDataFolder();
+    }
+  }, []);
+
+  const userDataJsonInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleImportUserDataJsonClick = useCallback(() => {
+    if (userDataJsonInputRef.current) {
+      userDataJsonInputRef.current.click();
+    }
+  }, []);
+
+  const handleImportUserDataJsonFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        const meta = parsed?._fileMeta && typeof parsed._fileMeta === 'object' ? parsed._fileMeta : {};
+        const chosenFileName = file.name || meta.fileName || 'user-data.json';
+        const chosenFullPath =
+          meta.macFilePath ||
+          meta.filePath ||
+          (file.webkitRelativePath
+            ? `iCloud Drive / ${file.webkitRelativePath}`
+            : `iCloud Drive / BudgetingMacApp / ${chosenFileName}`);
+        const chosenFolderPath =
+          meta.folderPath ||
+          (chosenFullPath.includes('/') ? chosenFullPath.slice(0, chosenFullPath.lastIndexOf('/')) : 'iCloud Drive');
+        const chosenDisplayLocation =
+          meta.displayLocation || `☁️ iCloud Drive / BudgetingMacApp / ${chosenFileName}`;
+        const chosenIsICloud = meta.isICloud !== undefined ? Boolean(meta.isICloud) : true;
+
+        const lockedInfo: DataFileInfo = {
+          filePath: chosenFullPath,
+          fileName: chosenFileName,
+          folderPath: chosenFolderPath,
+          displayLocation: chosenDisplayLocation,
+          isICloud: chosenIsICloud,
+          isCustomPrimary: true,
+          iCloudAvailable: true,
+          iCloudDefaultPath: chosenFullPath,
+          exists: true,
+          size: file.size || text.length,
+          lastModified: file.lastModified || Date.now(),
+          candidates: [chosenFullPath],
+        };
+
+        setDataFileInfo(lockedInfo);
+        try {
+          localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(lockedInfo));
+          localStorage.setItem(FULL_DATA_SNAPSHOT_STORAGE_KEY, JSON.stringify(parsed));
+        } catch {}
+        await saveToPersistentIdb(LINKED_FILE_INFO_STORAGE_KEY, lockedInfo);
+        await saveToPersistentIdb(FULL_DATA_SNAPSHOT_STORAGE_KEY, parsed);
+
+        applyFullUserData(parsed, `${chosenFileName} (${chosenDisplayLocation})`);
+        if (window.budgetApp) {
+          await refreshDataFileInfo();
+        }
+        setStatusMessage(
+          `File principale "${chosenFileName}" collegato e fissato in posizione: ${chosenDisplayLocation}`
+        );
+      } catch (err: any) {
+        setStatusMessage(`Impossibile leggere il file: ${err?.message || 'formato non valido'}`);
+      } finally {
+        if (e.target) e.target.value = '';
+      }
+    },
+    [applyFullUserData, refreshDataFileInfo]
+  );
+
+  const handleExportUserDataJson = useCallback(async () => {
+    const dataToExport = buildCurrentFullDataPayload();
+    const targetFileName = dataFileInfo?.fileName || 'user-data.json';
+    const serialized = JSON.stringify(dataToExport, null, 2);
+
+    // Update persistent storage on Web as well
+    if (!window.budgetApp) {
+      const updatedInfo: DataFileInfo = {
+        filePath: dataFileInfo?.filePath || `iCloud Drive / BudgetingMacApp / ${targetFileName}`,
+        fileName: targetFileName,
+        folderPath: dataFileInfo?.folderPath || 'iCloud Drive / BudgetingMacApp',
+        displayLocation: dataFileInfo?.displayLocation || `☁️ iCloud Drive / BudgetingMacApp / ${targetFileName}`,
+        isICloud: dataFileInfo?.isICloud !== undefined ? dataFileInfo.isICloud : true,
+        isCustomPrimary: true,
+        iCloudAvailable: true,
+        exists: true,
+        size: serialized.length,
+        lastModified: Date.now(),
+        candidates: dataFileInfo?.candidates || [`iCloud Drive / BudgetingMacApp / ${targetFileName}`],
+      };
+      setDataFileInfo(updatedInfo);
+      try {
+        localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(updatedInfo));
+        localStorage.setItem(FULL_DATA_SNAPSHOT_STORAGE_KEY, serialized);
+      } catch {}
+      await saveToPersistentIdb(LINKED_FILE_INFO_STORAGE_KEY, updatedInfo);
+      await saveToPersistentIdb(FULL_DATA_SNAPSHOT_STORAGE_KEY, dataToExport);
+    }
+
+    const blob = new Blob([serialized], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = targetFileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setStatusMessage(`File "${targetFileName}" salvato con successo (${dataFileInfo?.displayLocation || targetFileName}).`);
+  }, [buildCurrentFullDataPayload, dataFileInfo]);
+
+  useEffect(() => {
+    if (window.budgetApp && typeof window.budgetApp.ping === 'function') {
+      window.budgetApp.ping().then((result) => {
+        if (result?.platform) {
+          setPlatform(result.platform);
+        }
+        refreshDataFileInfo();
+      });
+    }
   }, [refreshDataFileInfo]);
 
   useEffect(() => {
@@ -3734,12 +3347,45 @@ function App() {
         try {
           const fileData = await window.budgetApp.loadData();
           if (fileData) {
-            applyFullUserData(fileData, 'file user-data.json su disco');
+            applyFullUserData(fileData, 'file user-data.json principale');
           }
         } catch (err) {
           console.error('Errore durante il caricamento dei dati da disco:', err);
         }
         await refreshDataFileInfo();
+      } else {
+        // Web / Local persistence: restore locked file info and full snapshot from IndexedDB / localStorage
+        try {
+          const idbInfo = await loadFromPersistentIdb<DataFileInfo>(LINKED_FILE_INFO_STORAGE_KEY);
+          const idbSnapshot = await loadFromPersistentIdb<any>(FULL_DATA_SNAPSHOT_STORAGE_KEY);
+
+          if (idbInfo && typeof idbInfo.filePath === 'string') {
+            setDataFileInfo(idbInfo);
+            try {
+              localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(idbInfo));
+            } catch {}
+          }
+
+          if (idbSnapshot && typeof idbSnapshot === 'object') {
+            applyFullUserData(
+              idbSnapshot,
+              idbInfo?.displayLocation || idbInfo?.fileName || 'file principale collegato'
+            );
+          } else {
+            try {
+              const rawSnap = localStorage.getItem(FULL_DATA_SNAPSHOT_STORAGE_KEY);
+              if (rawSnap) {
+                const parsedSnap = JSON.parse(rawSnap);
+                applyFullUserData(
+                  parsedSnap,
+                  idbInfo?.displayLocation || idbInfo?.fileName || 'file principale collegato'
+                );
+              }
+            } catch {}
+          }
+        } catch (err) {
+          console.error('Errore ripristino persistente locale:', err);
+        }
       }
       setIsStorageInitialized(true);
     };
@@ -3803,42 +3449,45 @@ function App() {
   useEffect(() => {
     if (!isStorageInitialized) return;
 
-    const bridge = window.budgetApp;
-    if (bridge && typeof bridge.saveData === 'function') {
-      const timer = setTimeout(() => {
-        const dataToSave = {
-          transactions,
-          transactionOrder,
-          budgetCategories,
-          assets,
-          openingCash: storedOpeningCash,
-          openingNetWorth,
-          openingDate,
-          assetTransactions,
-          recurringTransactions,
-          pianiAccumulo,
-          cashbackRules,
-          accountInitialCapitals,
-          subscriptions,
-          theme,
-          accentColor,
-          bgEffect,
-          hideNumbers,
-          customLogo,
-          githubRepo,
-          githubToken,
-          autoCheckUpdates,
-        };
+    const timer = setTimeout(() => {
+      const dataToSave = buildCurrentFullDataPayload();
+      const bridge = window.budgetApp;
 
-        bridge.saveData(dataToSave).catch((err) => {
-          console.error('Errore durante il salvataggio dei dati su disco:', err);
-        });
-      }, 700);
+      if (bridge && typeof bridge.saveData === 'function') {
+        bridge
+          .saveData(dataToSave)
+          .then(() => {
+            refreshDataFileInfo();
+          })
+          .catch((err) => {
+            console.error('Errore durante il salvataggio dei dati su disco:', err);
+          });
+      } else {
+        // Persist full snapshot & keep chosen file info locked locally
+        try {
+          const serialized = JSON.stringify(dataToSave);
+          localStorage.setItem(FULL_DATA_SNAPSHOT_STORAGE_KEY, serialized);
+          if (dataFileInfo) {
+            const updatedInfo: DataFileInfo = {
+              ...dataFileInfo,
+              size: serialized.length,
+              lastModified: Date.now(),
+              exists: true,
+            };
+            localStorage.setItem(LINKED_FILE_INFO_STORAGE_KEY, JSON.stringify(updatedInfo));
+            saveToPersistentIdb(LINKED_FILE_INFO_STORAGE_KEY, updatedInfo);
+          }
+        } catch {}
+        saveToPersistentIdb(FULL_DATA_SNAPSHOT_STORAGE_KEY, dataToSave);
+      }
+    }, 700);
 
-      return () => clearTimeout(timer);
-    }
+    return () => clearTimeout(timer);
   }, [
     isStorageInitialized,
+    buildCurrentFullDataPayload,
+    refreshDataFileInfo,
+    dataFileInfo,
     transactions,
     transactionOrder,
     budgetCategories,
@@ -4622,7 +4271,6 @@ function App() {
     today.setHours(0, 0, 0, 0);
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth(); // 0-11
-    const currentDay = today.getDate(); // 1-31
 
     let horizonEndDate: Date;
     if (scadenziarioHorizon === '30d') {
@@ -4884,7 +4532,6 @@ function App() {
   }, [cashAvailable, recurringTransactions, pianiAccumulo, assets, scadenziarioHorizon]);
 
   const {
-    currentMonthTransactions,
     currentMonthExpenseTransactions,
     currentMonthIncomeTransactions,
     currentMonthIncomeTotal
@@ -4913,7 +4560,6 @@ function App() {
     }
 
     return {
-      currentMonthTransactions: currentMonth,
       currentMonthExpenseTransactions: expenses,
       currentMonthIncomeTransactions: incomes,
       currentMonthIncomeTotal: incomeSum,
@@ -5371,6 +5017,30 @@ function App() {
         const tickerCleanB = b.ticker ? b.ticker.toUpperCase() : '';
         const tDataB = tickerCleanB ? tickerData[tickerCleanB] : null;
         valB = tDataB && typeof tDataB.price === 'number' ? tDataB.price : b.unitValue;
+      } else if (assetSortBy === 'roi') {
+        const qtyA = getAssetCurrentQuantity(a);
+        const tickerCleanA = a.ticker ? a.ticker.toUpperCase() : '';
+        const tDataA = tickerCleanA ? tickerData[tickerCleanA] : null;
+        const priceA = tDataA && typeof tDataA.price === 'number' ? tDataA.price : a.unitValue;
+        valA = computeAssetPerformance(a, assetTransactions, priceA, qtyA).roiPercent;
+
+        const qtyB = getAssetCurrentQuantity(b);
+        const tickerCleanB = b.ticker ? b.ticker.toUpperCase() : '';
+        const tDataB = tickerCleanB ? tickerData[tickerCleanB] : null;
+        const priceB = tDataB && typeof tDataB.price === 'number' ? tDataB.price : b.unitValue;
+        valB = computeAssetPerformance(b, assetTransactions, priceB, qtyB).roiPercent;
+      } else if (assetSortBy === 'pmc') {
+        const qtyA = getAssetCurrentQuantity(a);
+        const tickerCleanA = a.ticker ? a.ticker.toUpperCase() : '';
+        const tDataA = tickerCleanA ? tickerData[tickerCleanA] : null;
+        const priceA = tDataA && typeof tDataA.price === 'number' ? tDataA.price : a.unitValue;
+        valA = computeAssetPerformance(a, assetTransactions, priceA, qtyA).pmc;
+
+        const qtyB = getAssetCurrentQuantity(b);
+        const tickerCleanB = b.ticker ? b.ticker.toUpperCase() : '';
+        const tDataB = tickerCleanB ? tickerData[tickerCleanB] : null;
+        const priceB = tDataB && typeof tDataB.price === 'number' ? tDataB.price : b.unitValue;
+        valB = computeAssetPerformance(b, assetTransactions, priceB, qtyB).pmc;
       } else {
         // 'value' (total value) is default
         const qtyA = getAssetCurrentQuantity(a);
@@ -5565,6 +5235,47 @@ function App() {
     });
   }, [budgetCategories, currentMonthExpenseTransactions, currentMonthUpcomingRecurringExpenses, totalMonthIncome]);
 
+  // Automated background evaluation for budget threshold alerts, recurring deadlines and periodic transaction reminders (macOS)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      checkAndTriggerFinancialAlerts({
+        categories: categoryRows.map((c) => ({
+          name: c.name,
+          budget: c.limit || 0,
+          spent: c.actualSpent || 0,
+        })),
+        recurringTransactions: recurringTransactions.map((r) => ({
+          id: r.id,
+          merchant: r.merchant,
+          amount: r.amount,
+          account: r.account,
+          startDate: r.startDate,
+          frequency: r.frequency,
+          dayOfMonth: r.dayOfMonth,
+          isActive: r.isActive,
+        })),
+      }).catch((err) => {
+        console.warn('Auto notification check warning:', err);
+      });
+
+      // Check periodic reminder to record/update transactions
+      const latestTx = transactions.length > 0 ? transactions[0]?.date : undefined;
+      checkTransactionReminder(latestTx).catch((err) => {
+        console.warn('Transaction reminder check warning:', err);
+      });
+    }, 2500);
+
+    const intervalTimer = setInterval(() => {
+      const latestTx = transactions.length > 0 ? transactions[0]?.date : undefined;
+      checkTransactionReminder(latestTx).catch(() => {});
+    }, 30 * 60 * 1000);
+
+    return () => {
+      clearTimeout(timer);
+      clearInterval(intervalTimer);
+    };
+  }, [categoryRows, recurringTransactions, transactions]);
+
   const sortedCategoryRows = useMemo(() => {
     const rows = [...categoryRows];
     rows.sort((a, b) => {
@@ -5678,7 +5389,6 @@ function App() {
   const reportIncomeTotal = reportIncomeTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
   const reportNetFlow = reportIncomeTotal - reportExpenseTotal;
   const recentTransactions = filteredTransactions.slice(0, 6);
-  const monthlySavings = Math.max(netFlow, 0);
 
   useEffect(() => {
     setSelectedTransactionIds((currentSelected) =>
@@ -6259,76 +5969,6 @@ function App() {
     setStatusMessage(`Scadenza rimborso aggiornata: ${newDueDate ? formatDisplayDate(newDueDate) : 'rimossa'}.`);
   };
 
-  const handleAddSubscription = (subData: Omit<Subscription, 'id' | 'createdAt'>) => {
-    const newSub: Subscription = {
-      ...subData,
-      id: `sub-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
-      createdAt: Date.now(),
-    };
-    setSubscriptions((prev) => [newSub, ...prev]);
-    setStatusMessage(`Abbonamento "${newSub.name}" aggiunto con successo.`);
-  };
-
-  const handleUpdateSubscription = (id: string, updates: Partial<Subscription>) => {
-    setSubscriptions((prev) =>
-      prev.map((sub) => (sub.id === id ? { ...sub, ...updates } : sub))
-    );
-    setStatusMessage('Abbonamento aggiornato.');
-  };
-
-  const handleDeleteSubscription = (id: string) => {
-    const target = subscriptions.find((sub) => sub.id === id);
-    const name = target ? target.name : 'questo abbonamento';
-
-    askConfirmation({
-      title: 'Elimina abbonamento',
-      subtitle: name,
-      message: `Sei sicuro di voler eliminare l'abbonamento "${name}"? I futuri rinnovi periodici non verranno più monitorati.`,
-      itemDetails: target ? [
-        { label: 'Servizio', value: target.name },
-        { label: 'Costo', value: formatEuro(target.amount) },
-        { label: 'Frequenza', value: target.frequency },
-      ] : undefined,
-      confirmLabel: 'Elimina abbonamento',
-      onConfirm: () => {
-        setSubscriptions((prev) => prev.filter((sub) => sub.id !== id));
-        setStatusMessage(`Abbonamento "${name}" eliminato.`);
-      },
-    });
-  };
-
-  const handleRecordTransactionForSubscription = (sub: Subscription) => {
-    const newTx: Transaction = {
-      id: createTransactionId(),
-      date: getTodayIso(),
-      merchant: sub.name,
-      category: sub.category || 'Abbonamenti',
-      subcategory: 'Abbonamento',
-      account: sub.account || accountOptions[0] || 'Conto principale',
-      amount: -Math.abs(sub.amount),
-      kind: 'expense',
-      note: `Rinnovo ${sub.name} (${sub.frequency})`,
-      createdAt: Date.now(),
-    };
-
-    upsertTransaction(newTx);
-
-    const curDate = new Date(sub.nextRenewalDate || getTodayIso());
-    if (sub.frequency === 'yearly') {
-      curDate.setFullYear(curDate.getFullYear() + 1);
-    } else if (sub.frequency === 'quarterly') {
-      curDate.setMonth(curDate.getMonth() + 3);
-    } else if (sub.frequency === 'semiannual') {
-      curDate.setMonth(curDate.getMonth() + 6);
-    } else {
-      curDate.setMonth(curDate.getMonth() + 1);
-    }
-    const nextDateStr = curDate.toISOString().slice(0, 10);
-
-    handleUpdateSubscription(sub.id, { nextRenewalDate: nextDateStr });
-    setStatusMessage(`Registrata spesa per "${sub.name}" (${formatEuro(sub.amount)}). Prossimo rinnovo al ${formatDisplayDate(nextDateStr)}.`);
-  };
-
   const resetEditor = () => {
     setEditorMode('create');
     setEditingTransactionId(null);
@@ -6458,26 +6098,6 @@ function App() {
 
   const clearTransactionSelection = () => {
     setSelectedTransactionIds([]);
-  };
-
-  const moveTransactionInOrder = (transactionId: string, direction: -1 | 1) => {
-    setTransactionOrder((currentOrder) => {
-      const currentIndex = currentOrder.indexOf(transactionId);
-
-      if (currentIndex < 0) {
-        return currentOrder;
-      }
-
-      const nextIndex = currentIndex + direction;
-
-      if (nextIndex < 0 || nextIndex >= currentOrder.length) {
-        return currentOrder;
-      }
-
-      const nextOrder = [...currentOrder];
-      [nextOrder[currentIndex], nextOrder[nextIndex]] = [nextOrder[nextIndex], nextOrder[currentIndex]];
-      return nextOrder;
-    });
   };
 
   const applyBulkUpdate = (event: FormEvent<HTMLFormElement>) => {
@@ -6809,6 +6429,9 @@ function App() {
         : formatEuro(val);
     };
 
+    const currentPrice = tData && typeof tData.price === 'number' ? tData.price : asset.unitValue;
+    const perf = computeAssetPerformance(asset, assetTransactions, currentPrice, currentQty);
+
     return (
       <div className="panel panel-large" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         <div className="panel-header panel-header-wrap" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginBottom: '0.25rem' }}>
@@ -6824,15 +6447,15 @@ function App() {
           </button>
         </div>
 
-        <div className="mini-stat-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+        <div className="mini-stat-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Quantità</span>
             <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: 'var(--text)' }}>{currentQty}</strong>
           </div>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Valore Totale</span>
-            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: '#10b981' }}>
-              {tData && typeof tData.price === 'number' ? formatTickerCurrency(currentQty * tData.price, tData.currency) : formatEuro(currentQty * asset.unitValue)}
+            <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>PMC (Carico)</span>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: 'var(--text)' }}>
+              {formatEuro(perf.pmc)}
             </strong>
           </div>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
@@ -6840,6 +6463,21 @@ function App() {
             <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: '#38bdf8' }}>
               {tData && typeof tData.price === 'number' ? formatTickerCurrency(tData.price, tData.currency) : formatEuro(asset.unitValue)}
             </strong>
+          </div>
+          <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Valore Totale</span>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: '#10b981' }}>
+              {tData ? formatTickerCurrency(perf.totalMarketValue, tData.currency) : formatEuro(perf.totalMarketValue)}
+            </strong>
+          </div>
+          <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Rendimento (ROI)</span>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)' }}>
+              {perf.roiPercent > 0 ? '+' : ''}{perf.roiPercent.toFixed(2)}%
+            </strong>
+            <span style={{ fontSize: '0.68rem', color: perf.pnlEuro > 0 ? '#10b981' : perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)' }}>
+              {perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(perf.pnlEuro)}
+            </span>
           </div>
         </div>
 
@@ -7279,7 +6917,7 @@ function App() {
     const showPortfolioChart = assetPortfolioTrend.length > 1;
 
     return (
-      <section className="section-grid" style={{ display: 'grid', gridTemplateColumns: '1.25fr 1fr', gap: '1.5rem', alignItems: 'start' }}>
+      <section className="section-grid assets-split-grid">
         <div className="panel panel-large" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           <div className="panel-header panel-header-wrap" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', marginBottom: '0.25rem' }}>
             <div>
@@ -7981,6 +7619,8 @@ function App() {
                   }}
                 >
                   <option value="value">Valore Totale</option>
+                  <option value="roi">Rendimento % (ROI)</option>
+                  <option value="pmc">Prezzo Medio Carico (PMC)</option>
                   <option value="name">Nome</option>
                   <option value="qty">Quantità</option>
                   <option value="unitValue">Quotazione</option>
@@ -8012,18 +7652,296 @@ function App() {
             </div>
           )}
 
+          {/* Header with Counter and Table/Cards View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 600 }}>
+              {processedAssets.length} {processedAssets.length === 1 ? 'Strumento' : 'Strumenti in Portafoglio'}
+            </span>
+            <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--overlay-subtle)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                onClick={() => setAssetViewMode('table')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  backgroundColor: assetViewMode === 'table' ? 'var(--accent)' : 'transparent',
+                  color: assetViewMode === 'table' ? '#ffffff' : 'var(--muted)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                📊 Vista Tabella (con ROI)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssetViewMode('cards')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  backgroundColor: assetViewMode === 'cards' ? 'var(--accent)' : 'transparent',
+                  color: assetViewMode === 'cards' ? '#ffffff' : 'var(--muted)',
+                  border: 'none',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                🗂️ Vista Schede
+              </button>
+            </div>
+          </div>
+
           <div className="asset-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {assets.length === 0 ? (
               <p style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', fontStyle: 'italic', padding: '1.5rem 0' }}>Nessun asset in portafoglio. Creane uno usando il modulo a destra.</p>
             ) : processedAssets.length === 0 ? (
               <p style={{ fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center', fontStyle: 'italic', padding: '1.5rem 0' }}>Nessun asset corrisponde ai filtri impostati.</p>
+            ) : assetViewMode === 'table' ? (
+              <div className="transaction-table" style={{ width: '100%', overflowX: 'auto', borderRadius: '14px', border: '1px solid var(--border)', background: 'var(--overlay-subtle)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '10px 14px', fontSize: '0.78rem', color: 'var(--muted)' }}>Strumento</th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', color: 'var(--muted)' }}>Classe</th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }}>Quantità</th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }} title="Prezzo Medio di Carico ponderato sulle transazioni storiche di acquisto">
+                        PMC (Carico)
+                      </th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }}>Quotazione</th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }}>Valore Attuale</th>
+                      <th style={{ padding: '10px 14px', fontSize: '0.78rem', textAlign: 'right', color: '#38bdf8' }} title="Rendimento percentuale calcolato tra Prezzo Medio di Carico e Quotazione attuale">
+                        Rendimento % (ROI)
+                      </th>
+                      <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'center', color: 'var(--muted)' }}>Azioni</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {processedAssets.map((asset) => {
+                      const currentQty = getAssetCurrentQuantity(asset);
+                      const tickerClean = asset.ticker ? asset.ticker.toUpperCase() : '';
+                      const tData = tickerClean ? tickerData[tickerClean] : null;
+                      const currentPrice = tData && typeof tData.price === 'number' ? tData.price : asset.unitValue;
+                      const perf = computeAssetPerformance(asset, assetTransactions, currentPrice, currentQty);
+                      const isSelected = selectedAssetIdForDetails === asset.id;
+
+                      return (
+                        <tr
+                          key={asset.id}
+                          onClick={() => {
+                            if (selectedAssetIdForDetails !== asset.id) {
+                              handleCancelEditAssetTransaction();
+                            }
+                            setSelectedAssetIdForDetails(asset.id);
+                          }}
+                          style={{
+                            borderBottom: '1px solid var(--border)',
+                            backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                            cursor: 'pointer',
+                            transition: 'background-color 0.15s ease',
+                          }}
+                        >
+                          <td style={{ padding: '12px 14px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <strong style={{ fontSize: '0.88rem', color: 'var(--text)' }}>{asset.name}</strong>
+                                {asset.ticker && (
+                                  <span
+                                    style={{
+                                      fontSize: '0.625rem',
+                                      fontWeight: 700,
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                      color: '#38bdf8',
+                                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                                      fontFamily: 'var(--font-mono)',
+                                    }}
+                                  >
+                                    {tickerClean}
+                                  </span>
+                                )}
+                              </div>
+                              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>{asset.institution}</span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                background: isAssetBondEtf(asset)
+                                  ? 'rgba(16, 185, 129, 0.12)'
+                                  : isAssetEquityEtf(asset)
+                                  ? 'rgba(59, 130, 246, 0.12)'
+                                  : 'var(--overlay-medium)',
+                                color: isAssetBondEtf(asset)
+                                  ? '#10b981'
+                                  : isAssetEquityEtf(asset)
+                                  ? '#3b82f6'
+                                  : 'var(--text)',
+                                fontWeight: 600,
+                              }}
+                            >
+                              {formatAssetKindLabel(asset.kind, asset.etfSubtype)}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 600 }}>
+                            {currentQty}
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                              {formatEuro(perf.pmc)}
+                            </div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>
+                              Cap: {formatEuro(perf.totalCostInvested)}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                              {tData && typeof tData.price === 'number'
+                                ? formatTickerCurrency(tData.price, tData.currency)
+                                : formatEuro(asset.unitValue)}
+                            </div>
+                            {tData && (
+                              <div style={{ fontSize: '0.68rem', color: tData.price >= tData.previousClose ? '#10b981' : '#f43f5e' }}>
+                                ● {tData.price >= tData.previousClose ? '+' : ''}{((tData.price - tData.previousClose) / (tData.previousClose || 1) * 100).toFixed(2)}%
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700, color: '#10b981' }}>
+                            {tData ? formatTickerCurrency(perf.totalMarketValue, tData.currency) : formatEuro(perf.totalMarketValue)}
+                          </td>
+                          <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                              <span
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: '0.9rem',
+                                  color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '2px',
+                                }}
+                              >
+                                {perf.roiPercent > 0 ? '▲ +' : perf.roiPercent < 0 ? '▼ ' : ''}
+                                {perf.roiPercent.toFixed(2)}%
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  color: perf.pnlEuro > 0 ? '#10b981' : perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)',
+                                  opacity: 0.85,
+                                  fontFamily: 'var(--font-mono)',
+                                }}
+                              >
+                                {perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(perf.pnlEuro)}
+                              </span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                              <button
+                                className="text-button"
+                                type="button"
+                                onClick={() => {
+                                  if (selectedAssetIdForDetails !== asset.id) {
+                                    handleCancelEditAssetTransaction();
+                                  }
+                                  setSelectedAssetIdForDetails(asset.id);
+                                }}
+                                style={{ fontSize: '0.72rem', color: '#38bdf8', padding: '2px 4px' }}
+                                title="Visualizza transazioni e grafico specifico"
+                              >
+                                Dettagli
+                              </button>
+                              <button
+                                className="text-button"
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); openEditAsset(asset); }}
+                                style={{ fontSize: '0.72rem', color: '#94a3b8', padding: '2px 4px' }}
+                              >
+                                Modifica
+                              </button>
+                              <button
+                                className="text-button"
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleDeleteAssetDirect(asset.id); }}
+                                style={{ fontSize: '0.72rem', color: '#fb7185', padding: '2px 4px' }}
+                              >
+                                Elimina
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {processedAssets.length > 0 && (
+                    <tfoot>
+                      {(() => {
+                        let totalCost = 0;
+                        let totalMkt = 0;
+                        processedAssets.forEach((asset) => {
+                          const currentQty = getAssetCurrentQuantity(asset);
+                          const tickerClean = asset.ticker ? asset.ticker.toUpperCase() : '';
+                          const tData = tickerClean ? tickerData[tickerClean] : null;
+                          const currentPrice = tData && typeof tData.price === 'number' ? tData.price : asset.unitValue;
+                          const perf = computeAssetPerformance(asset, assetTransactions, currentPrice, currentQty);
+                          totalCost += perf.totalCostInvested;
+                          totalMkt += perf.totalMarketValue;
+                        });
+                        const totalPnl = totalMkt - totalCost;
+                        const totalRoi = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+
+                        return (
+                          <tr style={{ background: 'var(--overlay-medium)', fontWeight: 700, borderTop: '2px solid var(--border)' }}>
+                            <td colSpan={3} style={{ padding: '12px 14px', fontSize: '0.84rem' }}>
+                              Totale Strumenti Filtrati ({processedAssets.length})
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '0.84rem' }}>
+                              <div>{formatEuro(totalCost)}</div>
+                              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 400 }}>Capitale Investito</span>
+                            </td>
+                            <td style={{ padding: '12px' }}></td>
+                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '0.9rem', color: '#10b981' }}>
+                              <div>{formatEuro(totalMkt)}</div>
+                              <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 400 }}>Controvalore Attuale</span>
+                            </td>
+                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                <span style={{ fontSize: '0.95rem', color: totalRoi >= 0 ? '#10b981' : '#f43f5e' }}>
+                                  {totalRoi > 0 ? '▲ +' : totalRoi < 0 ? '▼ ' : ''}{totalRoi.toFixed(2)}%
+                                </span>
+                                <span style={{ fontSize: '0.72rem', color: totalPnl >= 0 ? '#10b981' : '#f43f5e' }}>
+                                  {totalPnl >= 0 ? '+' : ''}{formatEuro(totalPnl)}
+                                </span>
+                              </div>
+                            </td>
+                            <td></td>
+                          </tr>
+                        );
+                      })()}
+                    </tfoot>
+                  )}
+                </table>
+              </div>
             ) : (
               processedAssets.map((asset) => {
                 const currentQty = getAssetCurrentQuantity(asset);
                 const tickerClean = asset.ticker ? asset.ticker.toUpperCase() : '';
                 const tData = tickerClean ? tickerData[tickerClean] : null;
                 const currentPrice = tData && typeof tData.price === 'number' ? tData.price : asset.unitValue;
-                const totalValue = currentQty * currentPrice;
+                const perf = computeAssetPerformance(asset, assetTransactions, currentPrice, currentQty);
+                const totalValue = perf.totalMarketValue;
 
                 return (
                   <article
@@ -8124,19 +8042,20 @@ function App() {
                         </div>
                       </div>
                     </div>
-                    <div className="asset-details" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '0.78rem', color: 'var(--muted)', marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '8px' }}>
+                    <div className="asset-details" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '0.78rem', color: 'var(--muted)', marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '8px', alignItems: 'center' }}>
                       <span>Qta: <strong style={{ color: 'var(--text)' }}>{currentQty}</strong></span>
+                      <span>PMC: <strong style={{ color: 'var(--text)' }}>{formatEuro(perf.pmc)}</strong></span>
                       <span>Quotazione: <strong style={{ color: 'var(--text)' }}>{tData && typeof tData.price === 'number' ? formatTickerCurrency(tData.price, tData.currency) : formatEuro(asset.unitValue)}</strong></span>
+                      <span style={{ color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        ROI: {perf.roiPercent > 0 ? '▲ +' : perf.roiPercent < 0 ? '▼ ' : ''}{perf.roiPercent.toFixed(2)}%
+                        <span style={{ fontSize: '0.72rem', opacity: 0.85, fontWeight: 500 }}>({perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(perf.pnlEuro)})</span>
+                      </span>
                       {tData ? (
-                        <span style={{ color: tData.price >= tData.previousClose ? '#10b981' : '#f43f5e', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span style={{ fontSize: '0.55rem' }}>●</span> Real-time: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{formatTickerCurrency(tData.price, tData.currency)}</strong>
+                        <span style={{ color: tData.price >= tData.previousClose ? '#10b981' : '#f43f5e', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                          <span style={{ fontSize: '0.55rem' }}>●</span> Oggi: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{formatTickerCurrency(tData.price, tData.currency)}</strong>
                           <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>
                             ({tData.price >= tData.previousClose ? '+' : ''}{((tData.price - tData.previousClose) / (tData.previousClose || 1) * 100).toFixed(2)}%)
                           </span>
-                        </span>
-                      ) : asset.ticker ? (
-                        <span style={{ color: 'var(--muted)', fontSize: '0.7rem', fontStyle: 'italic' }}>
-                          Connessione quotazione in corso...
                         </span>
                       ) : null}
                     </div>
@@ -10794,43 +10713,7 @@ function App() {
             transition: 'all 0.15s ease'
           }}
         >
-          📊 Flussi & Spese
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setUnifiedReportTab('trend')}
-          style={{
-            padding: '8px 18px',
-            borderRadius: '8px',
-            fontSize: '0.85rem',
-            fontWeight: 650,
-            cursor: 'pointer',
-            border: 'none',
-            backgroundColor: unifiedReportTab === 'trend' ? 'var(--accent)' : 'transparent',
-            color: unifiedReportTab === 'trend' ? 'var(--pill-primary-text)' : 'var(--muted)',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          📉 Trend 6 Mesi
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setUnifiedReportTab('sankey')}
-          style={{
-            padding: '8px 18px',
-            borderRadius: '8px',
-            fontSize: '0.85rem',
-            fontWeight: 650,
-            cursor: 'pointer',
-            border: 'none',
-            backgroundColor: unifiedReportTab === 'sankey' ? 'var(--accent)' : 'transparent',
-            color: unifiedReportTab === 'sankey' ? 'var(--pill-primary-text)' : 'var(--muted)',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          🌊 Diagramma Flussi (Sankey)
+          📊 Flussi, Spese & Trend
         </button>
 
         <button
@@ -10978,49 +10861,87 @@ function App() {
       )}
 
       {unifiedReportTab === 'flussi' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+          {/* 1. CONTROLLO PERIODO UNIFICATO, INDICE RAPIDO & KPI FLUSSI */}
           <article className="panel large-panel" style={{ margin: 0 }}>
-            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
               <div>
-                <p className="panel-title">Report mensile</p>
-                <h4>Entrate vs Uscite (Anno in Corso)</h4>
+                <p className="panel-title">Centro Analisi Flussi, Spese &amp; Trend</p>
+                <h4>Sintesi finanziaria, distribuzione categorie, mappa flussi 50/30/20 e storico a 6 mesi</h4>
               </div>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setUnifiedReportTab('trend')}
-                style={{ fontSize: '0.8rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                📉 Analisi Trend 6 Mesi per Categoria ➔
-              </button>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600, marginRight: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Vai a:
+                </span>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => document.getElementById('unified-section-mensile')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  style={{ fontSize: '0.76rem', padding: '5px 10px', borderRadius: '8px' }}
+                >
+                  📊 Mensile &amp; Categorie
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => document.getElementById('unified-section-sankey')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  style={{ fontSize: '0.76rem', padding: '5px 10px', borderRadius: '8px' }}
+                >
+                  🌊 Flussi Sankey &amp; 50/30/20
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => document.getElementById('unified-section-trend')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  style={{ fontSize: '0.76rem', padding: '5px 10px', borderRadius: '8px' }}
+                >
+                  📉 Trend 6 Mesi &amp; MoM
+                </button>
+              </div>
             </div>
 
-            <div className="report-range">
-              <label className="form-field">
-                <span>Inizio intervallo</span>
-                <input
-                  type="date"
-                  value={reportRange.start}
-                  onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
-                />
-              </label>
-              <label className="form-field">
-                <span>Fine intervallo</span>
-                <input
-                  type="date"
-                  value={reportRange.end}
-                  onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
-                />
-              </label>
-            </div>
+            {/* Barra Filtro Periodo Unificata */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                flexWrap: 'wrap',
+                gap: '16px',
+                padding: '14px 16px',
+                borderRadius: '14px',
+                background: 'var(--overlay-subtle)',
+                border: '1px solid var(--border)',
+                marginBottom: '20px',
+              }}
+            >
+              <div className="report-range" style={{ margin: 0, flex: '1 1 320px' }}>
+                <label className="form-field" style={{ margin: 0 }}>
+                  <span>Inizio intervallo</span>
+                  <input
+                    type="date"
+                    value={reportRange.start}
+                    onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
+                  />
+                </label>
+                <label className="form-field" style={{ margin: 0 }}>
+                  <span>Fine intervallo</span>
+                  <input
+                    type="date"
+                    value={reportRange.end}
+                    onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
+                  />
+                </label>
+              </div>
 
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px', marginBottom: '24px', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 500, marginRight: '4px' }}>Intervalli rapidi:</span>
-              <button className="pill" type="button" onClick={() => setPresetRange('questo-mese')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Questo mese</button>
-              <button className="pill" type="button" onClick={() => setPresetRange('mese-scorso')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Mese scorso</button>
-              <button className="pill" type="button" onClick={() => setPresetRange('ultimi-3-mesi')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Ultimi 3 mesi</button>
-              <button className="pill" type="button" onClick={() => setPresetRange('quest-anno')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Quest'anno</button>
-              <button className="pill" type="button" onClick={() => setPresetRange('tutto')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Tutto</button>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.76rem', color: 'var(--muted)', fontWeight: 600, marginRight: '4px' }}>Intervalli rapidi:</span>
+                <button className="pill" type="button" onClick={() => setPresetRange('questo-mese')} style={{ fontSize: '0.76rem', padding: '6px 11px' }}>Questo mese</button>
+                <button className="pill" type="button" onClick={() => setPresetRange('mese-scorso')} style={{ fontSize: '0.76rem', padding: '6px 11px' }}>Mese scorso</button>
+                <button className="pill" type="button" onClick={() => setPresetRange('ultimi-3-mesi')} style={{ fontSize: '0.76rem', padding: '6px 11px' }}>Ultimi 3 mesi</button>
+                <button className="pill" type="button" onClick={() => setPresetRange('quest-anno')} style={{ fontSize: '0.76rem', padding: '6px 11px' }}>Quest'anno</button>
+                <button className="pill" type="button" onClick={() => setPresetRange('tutto')} style={{ fontSize: '0.76rem', padding: '6px 11px' }}>Tutto</button>
+              </div>
             </div>
 
             <div className="metric-grid metric-grid-report">
@@ -11039,357 +10960,356 @@ function App() {
               <MetricCard label="Risparmio mensile" value={formatEuro(Math.max(reportNetFlow, 0))} delta="Parte positiva del flusso netto filtrato" />
               <MetricCard label="Transazioni" value={String(reportTransactions.length)} delta="Voci presenti nell'intervallo scelto" />
             </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '24px 0 12px' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>Confronto Mensile {currentYear}</h3>
-              <div style={{ display: 'flex', gap: '16px', fontSize: '0.85rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '3px', background: 'linear-gradient(180deg, #34d399, #10b981)' }} />
-                  <span>Entrate</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ display: 'inline-block', width: '12px', height: '12px', borderRadius: '3px', background: 'linear-gradient(180deg, #fb7185, #f43f5e)' }} />
-                  <span>Uscite</span>
-                </div>
-              </div>
-            </div>
-            <div className="bar-chart bar-chart-wide" aria-label="Monthly comparison report chart" style={{ gridTemplateColumns: `repeat(${currentYearMonthlyData.length}, minmax(0, 1fr))`, minHeight: '260px' }}>
-              {(() => {
-                const maxVal = Math.max(...currentYearMonthlyData.map((p) => Math.max(p.income, p.expenses)), 1);
-                return currentYearMonthlyData.map((point) => (
-                  <div className="bar-column" key={point.label} style={{ gap: '6px' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '0.75rem', lineHeight: 1.1, minHeight: '32px', justifyContent: 'end' }}>
-                      <span style={{ color: '#10b981', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
-                      <span style={{ color: '#f43f5e', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
-                    </div>
-                    <div className="bar-track" style={{ display: 'flex', gap: '6px', alignItems: 'flex-end', justifyContent: 'center', padding: '6px' }}>
-                      <span
-                        title={`Entrate: ${formatEuro(point.income)}`}
-                        style={{
-                          height: `${Math.max((point.income / maxVal) * 100, 4)}%`,
-                          background: 'linear-gradient(180deg, #34d399, #10b981)',
-                          boxShadow: '0 8px 16px rgba(16, 185, 129, 0.16)',
-                          borderRadius: '6px',
-                          width: '100%'
-                        }}
-                      />
-                      <span
-                        title={`Uscite: ${formatEuro(point.expenses)}`}
-                        style={{
-                          height: `${Math.max((point.expenses / maxVal) * 100, 4)}%`,
-                          background: 'linear-gradient(180deg, #fb7185, #f43f5e)',
-                          boxShadow: '0 8px 16px rgba(244, 63, 94, 0.16)',
-                          borderRadius: '6px',
-                          width: '100%'
-                        }}
-                      />
-                    </div>
-                    <span className="bar-label" style={{ fontWeight: 500, color: 'var(--text)' }}>{point.label}</span>
-                  </div>
-                ));
-              })()}
-            </div>
           </article>
 
-          {/* SPESE CATEGORIE E SOTTO-CATEGORIE */}
-          <article className="panel large-panel" style={{ margin: 0 }}>
-            <div className="panel-header">
+          {/* 2. CONFRONTO MENSILE & DISTRIBUZIONE SPESE PER CATEGORIA (AFFIANCATI IN MODO ARMONICO) */}
+          <div
+            id="unified-section-mensile"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 460px), 1fr))',
+              gap: '20px',
+              alignItems: 'stretch',
+            }}
+          >
+            {/* Confronto Mensile Anno in Corso */}
+            <article className="panel large-panel" style={{ margin: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
               <div>
-                <p className="panel-title">Distribuzione Spese</p>
-                <h4>Analisi per categoria e sottocategoria</h4>
-              </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-subtle)', padding: '4px 8px', borderRadius: '8px' }}>
-                Totale spese filtrate: <strong style={{ color: 'var(--text)' }}>{formatEuro(reportExpenseTotal)}</strong>
-              </div>
-            </div>
-
-            {reportCategoryBreakdown.length === 0 ? (
-              <div style={{ display: 'grid', placeItems: 'center', height: '220px', color: 'var(--muted)', fontSize: '0.9rem' }}>
-                Nessuna spesa registrata nell'intervallo selezionato.
-              </div>
-            ) : (
-              <div className="pie-chart-container" style={{ display: 'flex', gap: '32px', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap' }}>
-                
-                {/* SVG PIE CHART */}
-                <div style={{ position: 'relative', width: '300px', height: '300px', flexShrink: 0 }}>
-                  <svg viewBox="0 0 240 240" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
-                    <g>
-                      {(() => {
-                        let currentAngle = 0;
-                        return reportCategoryBreakdown.map((cat) => {
-                          const angleSpan = (cat.spent / reportExpenseTotal) * 360;
-                          const catStartAngle = currentAngle;
-                          const catEndAngle = currentAngle + angleSpan;
-                          currentAngle = catEndAngle;
-
-                          const isCatHovered = activeCategory === cat.name || (hoveredSlice && hoveredSlice.name === cat.name && !hoveredSlice.isSub);
-                          const scale = isCatHovered ? 1.05 : 1.0;
-                          const slicePath = getDonutSlicePath(120, 120, 48 * scale, 75 * scale, catStartAngle, catEndAngle);
-
-                          return (
-                            <g key={`cat-g-${cat.name}`}>
-                              <path
-                                d={slicePath}
-                                fill={cat.color}
-                                stroke="var(--bg)"
-                                strokeWidth="1.5"
-                                style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
-                                onClick={() => handleReportSliceClick(cat.name)}
-                                onMouseEnter={() => {
-                                  setHoveredSlice({
-                                    name: cat.name,
-                                    spent: cat.spent,
-                                    percent: (cat.spent / reportExpenseTotal) * 100,
-                                    color: cat.color,
-                                    isSub: false,
-                                  });
-                                  setActiveCategory(cat.name);
-                                }}
-                                onMouseLeave={() => {
-                                  setHoveredSlice(null);
-                                  setActiveCategory(null);
-                                }}
-                              />
-                              
-                              {/* Subcategories inside this category slice */}
-                              {(() => {
-                                let subCurrentAngle = catStartAngle;
-                                return cat.subcategories.map((sub, sIdx) => {
-                                  const subAngleSpan = (sub.spent / cat.spent) * angleSpan;
-                                  const subStartAngle = subCurrentAngle;
-                                  const subEndAngle = subCurrentAngle + subAngleSpan;
-                                  subCurrentAngle = subEndAngle;
-
-                                  const isSubHovered = hoveredSlice && hoveredSlice.name === sub.name && hoveredSlice.isSub;
-                                  const subScale = isSubHovered ? 1.05 : (isCatHovered ? 1.02 : 1.0);
-                                  const subSlicePath = getDonutSlicePath(120, 120, 78 * subScale, 102 * subScale, subStartAngle, subEndAngle);
-                                  
-                                  const subOpacity = Math.max(0.3, 0.85 - sIdx * 0.15);
-
-                                  return (
-                                    <path
-                                      key={`sub-path-${cat.name}-${sub.name}`}
-                                      d={subSlicePath}
-                                      fill={cat.color}
-                                      opacity={subOpacity}
-                                      stroke="var(--bg)"
-                                      strokeWidth="1"
-                                      style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
-                                      onClick={() => handleReportSliceClick(cat.name, sub.name)}
-                                      onMouseEnter={() => {
-                                        setHoveredSlice({
-                                          name: sub.name,
-                                          spent: sub.spent,
-                                          percent: (sub.spent / reportExpenseTotal) * 100,
-                                          color: cat.color,
-                                          isSub: true,
-                                        });
-                                        setActiveCategory(cat.name);
-                                      }}
-                                      onMouseLeave={() => {
-                                        setHoveredSlice(null);
-                                        setActiveCategory(null);
-                                      }}
-                                    />
-                                  );
-                                });
-                              })()}
-                            </g>
-                          );
-                        });
-                      })()}
-                    </g>
-                  </svg>
-
-                  {/* Center Hole Tooltip/Display */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%)',
-                    textAlign: 'center',
-                    width: '110px',
-                    pointerEvents: 'none',
-                    zIndex: 2,
-                  }}>
-                    {hoveredSlice ? (
-                      <>
-                        <div style={{
-                          fontSize: '0.78rem',
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          color: hoveredSlice.isSub ? 'var(--muted)' : 'var(--text)',
-                          fontWeight: hoveredSlice.isSub ? 400 : 600,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis'
-                        }}>
-                          {hoveredSlice.name}
-                        </div>
-                        <div style={{ fontSize: '1rem', fontWeight: 700, color: hoveredSlice.color, marginTop: '2px' }}>
-                          {formatEuro(hoveredSlice.spent)}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '1px' }}>
-                          {hoveredSlice.percent.toFixed(1)}%
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.05em' }}>
-                          Spese
-                        </div>
-                        <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', marginTop: '2px' }}>
-                          {formatEuro(reportExpenseTotal)}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '1px' }}>
-                          Selezionato
-                        </div>
-                      </>
-                    )}
+                <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <p className="panel-title">Andamento Annuale</p>
+                    <h4>Confronto Mensile Entrate vs Uscite ({currentYear})</h4>
+                  </div>
+                  <div style={{ display: 'flex', gap: '14px', fontSize: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, #34d399, #10b981)' }} />
+                      <span>Entrate</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, #fb7185, #f43f5e)' }} />
+                      <span>Uscite</span>
+                    </div>
                   </div>
                 </div>
+                <p style={{ margin: '0 0 16px 0', fontSize: '0.78rem', color: 'var(--muted)' }}>
+                  Evoluzione mese per mese dei flussi di cassa nell'anno solare {currentYear}.
+                </p>
+              </div>
 
-                {/* DETAILED LEGEND / EXPANDABLE LIST */}
-                <div style={{ flex: 1, minWidth: '240px', paddingRight: '8px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {reportCategoryBreakdown.map((cat) => {
-                      const isCatActive = activeCategory === cat.name;
-                      return (
-                        <div
-                          key={`legend-${cat.name}`}
+              <div className="bar-chart bar-chart-wide" aria-label="Monthly comparison report chart" style={{ gridTemplateColumns: `repeat(${currentYearMonthlyData.length}, minmax(0, 1fr))`, minHeight: '270px', marginTop: 'auto' }}>
+                {(() => {
+                  const maxVal = Math.max(...currentYearMonthlyData.map((p) => Math.max(p.income, p.expenses)), 1);
+                  return currentYearMonthlyData.map((point) => (
+                    <div className="bar-column" key={point.label} style={{ gap: '6px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '0.72rem', lineHeight: 1.1, minHeight: '32px', justifyContent: 'end' }}>
+                        <span style={{ color: '#10b981', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
+                        <span style={{ color: '#f43f5e', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
+                      </div>
+                      <div className="bar-track" style={{ display: 'flex', gap: '5px', alignItems: 'flex-end', justifyContent: 'center', padding: '5px' }}>
+                        <span
+                          title={`Entrate: ${formatEuro(point.income)}`}
                           style={{
-                            background: isCatActive ? 'var(--overlay-subtle)' : 'transparent',
-                            borderRadius: '10px',
-                            padding: '6px 10px',
-                            transition: 'all 0.2s ease',
-                            cursor: 'pointer',
-                            border: isCatActive ? '1px solid var(--border)' : '1px solid transparent'
+                            height: `${Math.max((point.income / maxVal) * 100, 4)}%`,
+                            background: 'linear-gradient(180deg, #34d399, #10b981)',
+                            boxShadow: '0 8px 16px rgba(16, 185, 129, 0.16)',
+                            borderRadius: '6px',
+                            width: '100%'
                           }}
-                          onClick={() => handleReportSliceClick(cat.name)}
-                          onMouseEnter={() => setActiveCategory(cat.name)}
-                          onMouseLeave={() => setActiveCategory(null)}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color }} />
-                              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)' }}>{cat.name}</span>
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                              <strong style={{ fontSize: '0.85rem', color: 'var(--text)' }}>{formatEuro(cat.spent)}</strong>
-                              <small style={{ fontSize: '0.7rem', color: 'var(--muted)', marginLeft: '6px' }}>
-                                ({((cat.spent / reportExpenseTotal) * 100).toFixed(1)}%)
-                              </small>
-                            </div>
-                          </div>
+                        />
+                        <span
+                          title={`Uscite: ${formatEuro(point.expenses)}`}
+                          style={{
+                            height: `${Math.max((point.expenses / maxVal) * 100, 4)}%`,
+                            background: 'linear-gradient(180deg, #fb7185, #f43f5e)',
+                            boxShadow: '0 8px 16px rgba(244, 63, 94, 0.16)',
+                            borderRadius: '6px',
+                            width: '100%'
+                          }}
+                        />
+                      </div>
+                      <span className="bar-label" style={{ fontWeight: 500, color: 'var(--text)' }}>{point.label}</span>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </article>
 
-                          {/* Expandable subcategories */}
-                          {isCatActive && cat.subcategories.length > 0 && (
-                            <div style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '4px',
-                              marginTop: '6px',
-                              paddingLeft: '18px',
-                              borderLeft: `1.5px solid ${cat.color}`,
-                              paddingBottom: '2px'
-                            }}>
-                              {cat.subcategories.map((sub) => (
-                                <div
-                                  key={`legend-sub-${cat.name}-${sub.name}`}
-                                  style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    fontSize: '0.75rem',
-                                    color: 'var(--muted)',
-                                    cursor: 'pointer'
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleReportSliceClick(cat.name, sub.name);
-                                  }}
+            {/* Distribuzione Spese Categorie e Sottocategorie */}
+            <article className="panel large-panel" style={{ margin: 0 }}>
+              <div className="panel-header">
+                <div>
+                  <p className="panel-title">Distribuzione Spese</p>
+                  <h4>Analisi per categoria e sottocategoria</h4>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-subtle)', padding: '4px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  Totale spese: <strong style={{ color: 'var(--text)' }}>{formatEuro(reportExpenseTotal)}</strong>
+                </div>
+              </div>
+
+              {reportCategoryBreakdown.length === 0 ? (
+                <div style={{ display: 'grid', placeItems: 'center', height: '240px', color: 'var(--muted)', fontSize: '0.9rem' }}>
+                  Nessuna spesa registrata nell'intervallo selezionato.
+                </div>
+              ) : (
+                <div className="pie-chart-container" style={{ display: 'flex', gap: 'clamp(16px, 2vw, 28px)', alignItems: 'center', justifyContent: 'center', marginTop: '12px', flexWrap: 'wrap' }}>
+                  {/* SVG PIE CHART */}
+                  <div style={{ position: 'relative', width: 'min(260px, 100%)', aspectRatio: '1 / 1', flexShrink: 0 }}>
+                    <svg viewBox="0 0 240 240" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                      <g>
+                        {(() => {
+                          let currentAngle = 0;
+                          return reportCategoryBreakdown.map((cat) => {
+                            const angleSpan = (cat.spent / reportExpenseTotal) * 360;
+                            const catStartAngle = currentAngle;
+                            const catEndAngle = currentAngle + angleSpan;
+                            currentAngle = catEndAngle;
+
+                            const isCatHovered = activeCategory === cat.name || (hoveredSlice && hoveredSlice.name === cat.name && !hoveredSlice.isSub);
+                            const scale = isCatHovered ? 1.05 : 1.0;
+                            const slicePath = getDonutSlicePath(120, 120, 48 * scale, 75 * scale, catStartAngle, catEndAngle);
+
+                            return (
+                              <g key={`cat-g-${cat.name}`}>
+                                <path
+                                  d={slicePath}
+                                  fill={cat.color}
+                                  stroke="var(--bg)"
+                                  strokeWidth="1.5"
+                                  style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
+                                  onClick={() => handleReportSliceClick(cat.name)}
                                   onMouseEnter={() => {
                                     setHoveredSlice({
-                                      name: sub.name,
-                                      spent: sub.spent,
-                                      percent: (sub.spent / reportExpenseTotal) * 100,
+                                      name: cat.name,
+                                      spent: cat.spent,
+                                      percent: (cat.spent / reportExpenseTotal) * 100,
                                       color: cat.color,
-                                      isSub: true,
+                                      isSub: false,
                                     });
+                                    setActiveCategory(cat.name);
                                   }}
                                   onMouseLeave={() => {
                                     setHoveredSlice(null);
+                                    setActiveCategory(null);
                                   }}
-                                >
-                                  <span>{sub.name}</span>
-                                  <div>
-                                    <strong>{formatEuro(sub.spent)}</strong>
-                                    <small style={{ fontSize: '0.65rem', marginLeft: '4px' }}>
-                                      ({((sub.spent / cat.spent) * 100).toFixed(0)}%)
-                                    </small>
-                                  </div>
-                                </div>
-                              ))}
+                                />
+
+                                {/* Subcategories inside this category slice */}
+                                {(() => {
+                                  let subCurrentAngle = catStartAngle;
+                                  return cat.subcategories.map((sub, sIdx) => {
+                                    const subAngleSpan = (sub.spent / cat.spent) * angleSpan;
+                                    const subStartAngle = subCurrentAngle;
+                                    const subEndAngle = subCurrentAngle + subAngleSpan;
+                                    subCurrentAngle = subEndAngle;
+
+                                    const isSubHovered = hoveredSlice && hoveredSlice.name === sub.name && hoveredSlice.isSub;
+                                    const subScale = isSubHovered ? 1.05 : (isCatHovered ? 1.02 : 1.0);
+                                    const subSlicePath = getDonutSlicePath(120, 120, 78 * subScale, 102 * subScale, subStartAngle, subEndAngle);
+
+                                    const subOpacity = Math.max(0.3, 0.85 - sIdx * 0.15);
+
+                                    return (
+                                      <path
+                                        key={`sub-path-${cat.name}-${sub.name}`}
+                                        d={subSlicePath}
+                                        fill={cat.color}
+                                        opacity={subOpacity}
+                                        stroke="var(--bg)"
+                                        strokeWidth="1"
+                                        style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
+                                        onClick={() => handleReportSliceClick(cat.name, sub.name)}
+                                        onMouseEnter={() => {
+                                          setHoveredSlice({
+                                            name: sub.name,
+                                            spent: sub.spent,
+                                            percent: (sub.spent / reportExpenseTotal) * 100,
+                                            color: cat.color,
+                                            isSub: true,
+                                          });
+                                          setActiveCategory(cat.name);
+                                        }}
+                                        onMouseLeave={() => {
+                                          setHoveredSlice(null);
+                                          setActiveCategory(null);
+                                        }}
+                                      />
+                                    );
+                                  });
+                                })()}
+                              </g>
+                            );
+                          });
+                        })()}
+                      </g>
+                    </svg>
+
+                    {/* Center Hole Tooltip/Display */}
+                    <div style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      textAlign: 'center',
+                      width: '110px',
+                      pointerEvents: 'none',
+                      zIndex: 2,
+                    }}>
+                      {hoveredSlice ? (
+                        <>
+                          <div style={{
+                            fontSize: '0.78rem',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                            color: hoveredSlice.isSub ? 'var(--muted)' : 'var(--text)',
+                            fontWeight: hoveredSlice.isSub ? 400 : 600,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {hoveredSlice.name}
+                          </div>
+                          <div style={{ fontSize: '1rem', fontWeight: 700, color: hoveredSlice.color, marginTop: '2px' }}>
+                            {formatEuro(hoveredSlice.spent)}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '1px' }}>
+                            {hoveredSlice.percent.toFixed(1)}%
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.05em' }}>
+                            Spese
+                          </div>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text)', marginTop: '2px' }}>
+                            {formatEuro(reportExpenseTotal)}
+                          </div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '1px' }}>
+                            Selezionato
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* DETAILED LEGEND / EXPANDABLE LIST */}
+                  <div style={{ flex: 1, minWidth: '220px', maxHeight: '290px', overflowY: 'auto', paddingRight: '6px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {reportCategoryBreakdown.map((cat) => {
+                        const isCatActive = activeCategory === cat.name;
+                        return (
+                          <div
+                            key={`legend-${cat.name}`}
+                            style={{
+                              background: isCatActive ? 'var(--overlay-subtle)' : 'transparent',
+                              borderRadius: '10px',
+                              padding: '6px 10px',
+                              transition: 'all 0.2s ease',
+                              cursor: 'pointer',
+                              border: isCatActive ? '1px solid var(--border)' : '1px solid transparent'
+                            }}
+                            onClick={() => handleReportSliceClick(cat.name)}
+                            onMouseEnter={() => setActiveCategory(cat.name)}
+                            onMouseLeave={() => setActiveCategory(null)}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: cat.color }} />
+                                <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text)' }}>{cat.name}</span>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <strong style={{ fontSize: '0.84rem', color: 'var(--text)' }}>{formatEuro(cat.spent)}</strong>
+                                <small style={{ fontSize: '0.7rem', color: 'var(--muted)', marginLeft: '6px' }}>
+                                  ({((cat.spent / reportExpenseTotal) * 100).toFixed(1)}%)
+                                </small>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+
+                            {/* Expandable subcategories */}
+                            {isCatActive && cat.subcategories.length > 0 && (
+                              <div style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '4px',
+                                marginTop: '6px',
+                                paddingLeft: '18px',
+                                borderLeft: `1.5px solid ${cat.color}`,
+                                paddingBottom: '2px'
+                              }}>
+                                {cat.subcategories.map((sub) => (
+                                  <div
+                                    key={`legend-sub-${cat.name}-${sub.name}`}
+                                    style={{
+                                      display: 'flex',
+                                      justifyContent: 'space-between',
+                                      fontSize: '0.75rem',
+                                      color: 'var(--muted)',
+                                      cursor: 'pointer'
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleReportSliceClick(cat.name, sub.name);
+                                    }}
+                                    onMouseEnter={() => {
+                                      setHoveredSlice({
+                                        name: sub.name,
+                                        spent: sub.spent,
+                                        percent: (sub.spent / reportExpenseTotal) * 100,
+                                        color: cat.color,
+                                        isSub: true,
+                                      });
+                                    }}
+                                    onMouseLeave={() => {
+                                      setHoveredSlice(null);
+                                    }}
+                                  >
+                                    <span>{sub.name}</span>
+                                    <div>
+                                      <strong>{formatEuro(sub.spent)}</strong>
+                                      <small style={{ fontSize: '0.65rem', marginLeft: '4px' }}>
+                                        ({((sub.spent / cat.spent) * 100).toFixed(0)}%)
+                                      </small>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
+              )}
+            </article>
+          </div>
 
+          {/* 3. DIAGRAMMA DEI FLUSSI FINANZIARI (SANKEY) & REGOLA 50/30/20 */}
+          <article id="unified-section-sankey" className="panel large-panel" style={{ margin: 0 }}>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '1.15rem' }}>🌊</span>
+                  <p className="panel-title" style={{ margin: 0 }}>Diagramma dei Flussi Finanziari (Sankey) &amp; Regola 50/30/20</p>
+                </div>
+                <h4 style={{ margin: '4px 0 0 0' }}>Mappa Visiva Entrate ➔ Macro-Aree (Necessità, Svago, Risparmio) ➔ Categorie Spesa</h4>
               </div>
-            )}
-          </article>
-        </div>
-      )}
-
-      {unifiedReportTab === 'trend' && (
-        <CategoryTrendReport
-          transactions={transactions}
-          formatEuro={formatEuro}
-          formatSignedEuro={formatSignedEuro}
-        />
-      )}
-
-      {unifiedReportTab === 'sankey' && (
-        <article className="panel large-panel" style={{ margin: 0 }}>
-          <div className="panel-header">
-            <div>
-              <p className="panel-title">Diagramma dei Flussi Finanziari</p>
-              <h4>Mappa Visiva Entrate ➔ Macro-Aree ➔ Categorie Spesa</h4>
+              <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-subtle)', padding: '5px 12px', borderRadius: '999px', border: '1px solid var(--border)' }}>
+                Periodo attivo: <strong style={{ color: 'var(--text)' }}>{formatDisplayDate(reportRange.start)}</strong> – <strong style={{ color: 'var(--text)' }}>{formatDisplayDate(reportRange.end)}</strong>
+              </span>
             </div>
-          </div>
 
-          <div className="report-range">
-            <label className="form-field">
-              <span>Inizio intervallo</span>
-              <input
-                type="date"
-                value={reportRange.start}
-                onChange={(event) => setReportRange((current) => ({ ...current, start: event.target.value }))}
-              />
-            </label>
-            <label className="form-field">
-              <span>Fine intervallo</span>
-              <input
-                type="date"
-                value={reportRange.end}
-                onChange={(event) => setReportRange((current) => ({ ...current, end: event.target.value }))}
-              />
-            </label>
-          </div>
+            <SankeyChart transactions={reportTransactions} budgetCategories={budgetCategories} formatEuro={formatEuro} />
+          </article>
 
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px', marginBottom: '24px', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--muted)', fontWeight: 500, marginRight: '4px' }}>Intervalli rapidi:</span>
-            <button className="pill" type="button" onClick={() => setPresetRange('questo-mese')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Questo mese</button>
-            <button className="pill" type="button" onClick={() => setPresetRange('mese-scorso')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Mese scorso</button>
-            <button className="pill" type="button" onClick={() => setPresetRange('ultimi-3-mesi')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Ultimi 3 mesi</button>
-            <button className="pill" type="button" onClick={() => setPresetRange('quest-anno')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Quest'anno</button>
-            <button className="pill" type="button" onClick={() => setPresetRange('tutto')} style={{ fontSize: '0.78rem', padding: '6px 12px' }}>Tutto</button>
+          {/* 4. TREND DI SPESA 6 MESI & CONFRONTO VARIAZIONI MESE SU MESE */}
+          <div id="unified-section-trend">
+            <CategoryTrendReport
+              transactions={transactions}
+              formatEuro={formatEuro}
+              formatSignedEuro={formatSignedEuro}
+            />
           </div>
-
-          <SankeyChart transactions={reportTransactions} budgetCategories={budgetCategories} formatEuro={formatEuro} />
-        </article>
+        </div>
       )}
 
       {unifiedReportTab === 'allocation' && (
@@ -11415,9 +11335,6 @@ function App() {
       )}
     </div>
   );
-
-  const renderReport = () => renderUnifiedReportAndNetWorth();
-  const renderNetWorth = () => renderUnifiedReportAndNetWorth();
 
   const renderRecurringAndPAC = () => {
     const allCategories = Array.from(new Set([
@@ -11666,7 +11583,7 @@ function App() {
             </section>
 
             {/* Liquidity Health Indicator & Urgency */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
               <div
                 style={{
                   padding: '12px 16px',
@@ -11831,7 +11748,7 @@ function App() {
                       background: 'var(--input-bg)',
                       color: 'var(--text)',
                       fontSize: '0.78rem',
-                      width: '200px',
+                      width: 'clamp(150px, 20vw, 220px)',
                     }}
                   />
                   {scadenziarioSearch && (
@@ -11999,7 +11916,7 @@ function App() {
 
         {/* Panel 1: Recurring Transactions */}
         {recurringViewMode === 'recurring' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 440px) 1fr', gap: '2rem', alignItems: 'start' }}>
+          <div className="responsive-split-grid">
             <article className="panel">
               <div className="panel-header">
                 <div>
@@ -12296,7 +12213,7 @@ function App() {
 
         {/* Panel 2: Piani di Accumulo (PAC) */}
         {recurringViewMode === 'pac' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 440px) 1fr', gap: '2rem', alignItems: 'start' }}>
+          <div className="responsive-split-grid">
             <article className="panel">
               <div className="panel-header">
                 <div>
@@ -12450,7 +12367,7 @@ function App() {
                   Nessun piano di accumulo impostato. Compila il modulo sopra per iniziare.
                 </p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxHeight: '420px', overflowY: 'auto', padding: '0.5rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxHeight: 'clamp(320px, calc(100vh - 320px), 680px)', overflowY: 'auto', padding: '0.5rem' }}>
                   {pianiAccumulo.map((pac) => {
                     const targetAsset = assets.find((a) => a.id === pac.assetId);
                     const debitAccount = pac.account || (targetAsset ? targetAsset.institution : '') || 'Conto principale';
@@ -12661,6 +12578,44 @@ function App() {
             >
               {hideNumbers ? <EyeOff size={14} /> : <Eye size={14} />}
               <span>{hideNumbers ? 'Disattiva oscuramento' : 'Attiva oscuramento'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Notifiche & Avvisi di Sistema (macOS) */}
+        <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+          <p className="panel-title" style={{ marginBottom: '10px', fontSize: '0.72rem' }}>Centro Notifiche &amp; Avvisi (macOS)</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--overlay-subtle)', padding: '12px 14px', borderRadius: '14px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <BellRing size={16} color="#38bdf8" />
+                Notifiche di Sistema su Mac
+              </span>
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+                Ricevi avvisi per superamento budget (80%/100%), scadenze ricorrenti e obiettivi finanziari
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowNotificationModal(true)}
+              style={{
+                padding: '7px 14px',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 600,
+                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                color: '#ffffff',
+                border: '0',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 2px 8px rgba(14, 165, 233, 0.25)',
+              }}
+            >
+              <Bell size={14} />
+              <span>Gestisci Notifiche &amp; Test</span>
             </button>
           </div>
         </div>
@@ -13062,22 +13017,21 @@ function App() {
                 Apri pagina GitHub Releases ↗
               </button>
 
-              <a
-                href="/api/download-ipa"
-                download={`BudgetApp-${APP_VERSION}.ipa`}
-                className="pill"
+              <button
+                type="button"
+                className="pill pill-primary"
+                onClick={() => setShowNotificationModal(true)}
                 style={{
                   padding: '9px 16px',
                   fontSize: '0.84rem',
                   cursor: 'pointer',
-                  textDecoration: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '6px',
                 }}
               >
-                📲 Scarica IPA per iOS (AltStore)
-              </a>
+                🔔 Centro Notifiche
+              </button>
             </div>
 
             {dismissedVersion && (
@@ -13131,29 +13085,58 @@ function App() {
         </div>
       </article>
 
-      {/* Sincronizzazione File Dati macOS Multi-Sessione */}
+      {/* Sincronizzazione File Dati macOS / iCloud Drive */}
       <article className="panel large-panel">
-        <div className="panel-header">
+        <div className="panel-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <p className="panel-title">Archiviazione & Sincronizzazione File Dati macOS</p>
-            <h4>Posizione sicura e ripristino automatico multi-sessione</h4>
+            <p className="panel-title">Archiviazione & Sincronizzazione File Dati (macOS &amp; iCloud Drive)</p>
+            <h4>Posizione principale scelta e sincronizzazione sul tuo Mac</h4>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            {dataFileInfo?.isICloud && (
+              <span
+                style={{
+                  fontSize: '0.74rem',
+                  fontWeight: 700,
+                  padding: '4px 10px',
+                  borderRadius: '999px',
+                  background: 'rgba(56, 189, 248, 0.16)',
+                  color: '#38bdf8',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                }}
+              >
+                ☁️ iCloud Drive Attivo
+              </span>
+            )}
+            <span
+              style={{
+                fontSize: '0.74rem',
+                fontWeight: 700,
+                padding: '4px 10px',
+                borderRadius: '999px',
+                background: 'rgba(16, 185, 129, 0.16)',
+                color: '#10b981',
+                border: '1px solid rgba(16, 185, 129, 0.35)',
+              }}
+            >
+              {dataFileInfo?.isCustomPrimary ? '📌 Posizione Principale Fissata ✓' : '📌 Posizione Principale Attiva'}
+            </span>
           </div>
         </div>
         <p className="import-hint" style={{ marginBottom: '1.2rem' }}>
-          I tuoi dati finanziari registrati sono memorizzati in modo permanente nella cartella Documenti del Mac in formato standard (<code>user-data.json</code>).
-          L'applicazione monitora questo file e si sincronizza in tempo reale, indipendentemente dal fatto che ci siano altre finestre o app aperte o che provengano da sessioni diverse.
+          Scegli dove salvare <code>user-data.json</code> su macOS (anche dentro <strong>iCloud Drive</strong>): la posizione scelta rimarrà bloccata come <strong>principale</strong> ad ogni avvio.
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div
             style={{
               background: 'var(--overlay-subtle)',
-              padding: '14px 16px',
-              borderRadius: '14px',
+              padding: '16px',
+              borderRadius: '16px',
               border: '1px solid var(--border)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px',
+              gap: '12px',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
@@ -13168,77 +13151,163 @@ function App() {
                     boxShadow: '0 0 8px #10b981',
                   }}
                 />
-                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>
-                  File Dati Attivo:
+                <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text)' }}>
+                  File Scelto & Posizione Principale:
                 </span>
               </div>
               {dataFileInfo?.lastModified ? (
                 <span style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
-                  Ultima modifica su disco: {new Date(dataFileInfo.lastModified).toLocaleString('it-IT')}
+                  Ultimo salvataggio: {new Date(dataFileInfo.lastModified).toLocaleString('it-IT')}
                 </span>
               ) : null}
             </div>
 
-            <code
+            <div
               style={{
-                fontSize: '0.78rem',
-                fontFamily: 'monospace',
-                background: 'var(--input-bg)',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                border: '1px solid var(--border)',
-                color: 'var(--accent)',
-                wordBreak: 'break-all',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '10px',
               }}
             >
-              {dataFileInfo?.filePath || '~/Documents/BudgetingMacApp/user-data.json'}
-            </code>
-
-            {dataFileInfo && (
-              <div style={{ display: 'flex', gap: '16px', fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px', flexWrap: 'wrap' }}>
-                <span>Stato file: <strong style={{ color: dataFileInfo.exists ? '#10b981' : '#f59e0b' }}>{dataFileInfo.exists ? 'Presente e sincronizzato ✓' : 'In attesa di primo salvataggio'}</strong></span>
-                {dataFileInfo.size > 0 && <span>Dimensione: {(dataFileInfo.size / 1024).toFixed(1)} KB</span>}
-                {dataFileInfo.candidates && dataFileInfo.candidates.length > 1 && (
-                  <span title={dataFileInfo.candidates.join('\n')}>
-                    Rilevate {dataFileInfo.candidates.length} posizioni storiche collegate
-                  </span>
-                )}
+              <div
+                style={{
+                  background: 'var(--input-bg)',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}
+              >
+                <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+                  📄 File Scelto
+                </span>
+                <strong style={{ fontSize: '0.92rem', color: 'var(--accent)', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                  {dataFileInfo?.fileName || 'user-data.json'}
+                </strong>
               </div>
-            )}
+
+              <div
+                style={{
+                  background: 'var(--input-bg)',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                }}
+              >
+                <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700 }}>
+                  📍 Posizione Scelta (Principale)
+                </span>
+                <strong style={{ fontSize: '0.86rem', color: 'var(--text)', wordBreak: 'break-word' }}>
+                  {dataFileInfo?.displayLocation || '📄 Documenti Mac / BudgetingMacApp / user-data.json'}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>
+                Percorso completo del file principale:
+              </span>
+              <code
+                style={{
+                  fontSize: '0.78rem',
+                  fontFamily: 'monospace',
+                  background: 'var(--input-bg)',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border)',
+                  color: 'var(--accent)',
+                  wordBreak: 'break-all',
+                }}
+              >
+                {dataFileInfo?.filePath || '~/Documents/BudgetingMacApp/user-data.json'}
+              </code>
+            </div>
+
+            <div style={{ display: 'flex', gap: '16px', fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px', flexWrap: 'wrap' }}>
+              <span>
+                Stato posizione:{' '}
+                <strong style={{ color: '#10b981' }}>
+                  {dataFileInfo?.isCustomPrimary
+                    ? 'Posizione principale bloccata (non cambia mai in automatico) ✓'
+                    : dataFileInfo?.exists
+                      ? 'Presente e sincronizzato ✓'
+                      : 'Pronto al salvataggio automatico ✓'}
+                </strong>
+              </span>
+              {dataFileInfo && dataFileInfo.size > 0 && (
+                <span>Dimensione: {(dataFileInfo.size / 1024).toFixed(1)} KB</span>
+              )}
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            {window.budgetApp ? (
+              <>
+                <button
+                  type="button"
+                  className="pill pill-primary"
+                  onClick={() => handleChooseSaveDataLocation(true)}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  📍 Scegli posizione dove salvare user-data.json (anche iCloud)...
+                </button>
+                <button
+                  type="button"
+                  className="pill pill-primary"
+                  onClick={handleUseICloudDataLocation}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  ☁️ Salva e imposta su iCloud Drive
+                </button>
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={handleSelectDataFile}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  🔗 Scegli file user-data.json esistente...
+                </button>
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={handleOpenDataFolder}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  📁 Mostra file nel Finder
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="pill pill-primary"
+                  onClick={handleImportUserDataJsonClick}
+                  style={{ padding: '10px 16px', fontSize: '0.84rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  📂 Scegli file user-data.json (da iCloud Drive / File)
+                </button>
+                <button
+                  type="button"
+                  className="pill pill-primary"
+                  onClick={handleExportUserDataJson}
+                  style={{ padding: '10px 16px', fontSize: '0.84rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                >
+                  ☁️ Salva / Aggiorna sullo stesso file ({dataFileInfo?.fileName || 'user-data.json'})
+                </button>
+              </>
+            )}
             <button
               type="button"
-              className="pill pill-primary"
-              onClick={handleImportUserDataJsonClick}
-              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-            >
-              📥 Importa file user-data.json
-            </button>
-            <button
-              type="button"
-              className="pill pill-primary"
+              className="pill"
               onClick={handleExportUserDataJson}
-              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+              style={{ padding: '9px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
             >
-              💾 Esporta backup user-data.json
-            </button>
-            <button
-              type="button"
-              className="pill"
-              onClick={handleOpenDataFolder}
-              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-            >
-              📁 Mostra cartella nel Finder
-            </button>
-            <button
-              type="button"
-              className="pill"
-              onClick={handleSelectDataFile}
-              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-            >
-              🔗 Seleziona / Collega file dati...
+              💾 Esporta copia user-data.json
             </button>
             <button
               type="button"
@@ -13248,12 +13317,18 @@ function App() {
                 if (window.budgetApp && typeof window.budgetApp.loadData === 'function') {
                   window.budgetApp.loadData().then((fileData) => {
                     if (fileData) {
-                      applyFullUserData(fileData, 'file user-data.json su disco');
+                      applyFullUserData(fileData, dataFileInfo?.displayLocation || 'file user-data.json principale');
+                    }
+                  });
+                } else {
+                  loadFromPersistentIdb<any>(FULL_DATA_SNAPSHOT_STORAGE_KEY).then((snap) => {
+                    if (snap) {
+                      applyFullUserData(snap, dataFileInfo?.displayLocation || dataFileInfo?.fileName || 'user-data.json');
                     }
                   });
                 }
               }}
-              style={{ padding: '8px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+              style={{ padding: '9px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
             >
               🔄 Ricarica dati dal file
             </button>
@@ -13528,7 +13603,6 @@ function App() {
 
     const isDark = theme === 'dark';
     const borderStroke = isDark ? 'rgba(148, 163, 184, 0.22)' : 'rgba(100, 116, 139, 0.18)';
-    const accentStroke = isDark ? 'rgba(94, 234, 212, 0.28)' : 'rgba(15, 118, 110, 0.24)';
 
     if (bgEffect === 'grid') {
       return (
@@ -13690,7 +13764,16 @@ function App() {
           ))}
         </nav>
 
-        <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+        <div
+          style={{
+            marginTop: 'auto',
+            paddingTop: '14px',
+            borderTop: '1px solid var(--border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+          }}
+        >
           <button
             type="button"
             onClick={() => {
@@ -13776,6 +13859,29 @@ function App() {
               {hideNumbers ? <EyeOff size={16} /> : <Eye size={16} />}
               <span>{hideNumbers ? 'Cifre oscurate' : 'Oscura cifre'}</span>
             </button>
+            <button
+              className="pill"
+              type="button"
+              onClick={() => setShowNotificationModal(true)}
+              title="Centro Notifiche: ricevi avvisi su scadenze e budget (macOS)"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(168, 85, 247, 0.12))',
+                color: '#c084fc',
+                border: '1px solid rgba(168, 85, 247, 0.35)',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                padding: '7px 14px',
+                borderRadius: '10px',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <Bell size={16} />
+              <span>Notifiche</span>
+            </button>
             {activeSection === 'dashboard' && (
               <button className="pill pill-primary" type="button" onClick={handleImportClick} title="Importa file Excel (.xlsx), Apple Numbers (.numbers), PDF estratti conto o CSV">
                 📥 Importa dati
@@ -13810,12 +13916,12 @@ function App() {
           </div>
         </header>
 
-        <section className="status-banner" aria-live="polite">
+        <section className="status-banner" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span className="status-badge">Azioni</span>
-          <p>{statusMessage}</p>
+          <p style={{ flex: 1, minWidth: '180px' }}>{statusMessage}</p>
           <div className="autosave-indicator" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#10b981', fontWeight: 500 }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }}></span>
-            <span>Autosalvataggio attivo</span>
+            <span>Autosalvataggio attivo (v{APP_VERSION})</span>
           </div>
         </section>
 
@@ -13853,6 +13959,100 @@ function App() {
           onSkipVersion={handleSkipVersion}
           onOpenReleaseUrl={handleOpenReleaseUrl}
         />
+        <NotificationModal
+          isOpen={showNotificationModal}
+          onClose={() => setShowNotificationModal(false)}
+          theme={theme}
+        />
+
+        {/* Floating macOS-Style In-App Notification Toast Banner */}
+        {activeToast && (
+          <div
+            style={{
+              position: 'fixed',
+              top: '20px',
+              right: '24px',
+              zIndex: 100000,
+              width: '380px',
+              maxWidth: 'calc(100vw - 48px)',
+              background: theme === 'light' ? '#ffffff' : 'rgba(15, 23, 42, 0.95)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: theme === 'light' ? '1px solid rgba(148, 163, 184, 0.35)' : '1px solid rgba(148, 163, 184, 0.25)',
+              borderRadius: '16px',
+              boxShadow: theme === 'light'
+                ? '0 20px 40px -10px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(148, 163, 184, 0.15)'
+                : '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+              padding: '14px 16px',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '12px',
+              animation: 'slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+              cursor: 'pointer',
+              color: theme === 'light' ? '#0f172a' : '#f8fafc',
+            }}
+            onClick={() => {
+              setShowNotificationModal(true);
+              setActiveToast(null);
+            }}
+            role="alert"
+          >
+            <div
+              style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                flexShrink: 0,
+                boxShadow: '0 4px 10px rgba(14, 165, 233, 0.3)',
+              }}
+            >
+              <Bell size={20} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: theme === 'light' ? '#0284c7' : '#38bdf8' }}>
+                  Registro Budget
+                </span>
+                <span style={{ fontSize: '0.7rem', color: theme === 'light' ? '#64748b' : '#94a3b8' }}>
+                  Adesso
+                </span>
+              </div>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '3px', color: theme === 'light' ? '#0f172a' : '#f8fafc' }}>
+                {activeToast.title}
+              </div>
+              <div style={{ fontSize: '0.78rem', lineHeight: 1.4, color: theme === 'light' ? '#475569' : '#cbd5e1' }}>
+                {activeToast.body}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveToast(null);
+              }}
+              aria-label="Chiudi notifica"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: theme === 'light' ? '#64748b' : '#94a3b8',
+                cursor: 'pointer',
+                padding: '4px',
+                borderRadius: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
         {renderActiveSection()}
       </main>
     </div>

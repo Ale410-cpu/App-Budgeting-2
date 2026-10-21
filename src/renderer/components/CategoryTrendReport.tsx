@@ -290,7 +290,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                   color: 'var(--text)',
                   fontSize: '0.85rem',
                   fontWeight: 650,
-                  minWidth: '200px',
+                  minWidth: 'min(200px, 100%)',
                 }}
               >
                 <option value="all">🌐 Tutte le Categorie (Spesa Globale)</option>
@@ -437,7 +437,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
           </div>
 
           <div style={{ width: '100%', overflowX: 'auto' }}>
-            <svg viewBox={`0 0 640 ${chartHeight}`} style={{ width: '100%', minWidth: '540px', height: 'auto', overflow: 'visible' }}>
+            <svg viewBox={`0 0 640 ${chartHeight}`} style={{ width: '100%', minWidth: 'min(480px, 100%)', height: 'auto', overflow: 'visible' }}>
               {/* Average Baseline Line */}
               {(() => {
                 const avgY = chartHeight - 50 - (trendData.avgMonthly / maxVal) * (chartHeight - 85);

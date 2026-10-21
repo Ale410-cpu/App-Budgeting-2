@@ -281,7 +281,6 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
 
   const {
     totalIncome,
-    totalExpense,
     netSavings,
     nodes,
     links,
@@ -616,11 +615,6 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
   const needsPct = totalIncome > 0 ? (needsVal / totalIncome) * 100 : 0;
   const wantsPct = totalIncome > 0 ? (wantsVal / totalIncome) * 100 : 0;
   const savingsPct = totalIncome > 0 ? (totalSavingsVal / totalIncome) * 100 : 0;
-
-  // Filtered categories for configuration modal
-  const filteredCategoriesForConfig = allDiscoveredCategories
-    .filter((cat) => cat.toLowerCase().includes(configSearch.toLowerCase()))
-    .sort((a, b) => a.localeCompare(b));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>

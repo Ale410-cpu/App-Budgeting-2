@@ -47,12 +47,10 @@ async function createGitHubRelease() {
     target_commitish: 'main',
     name: `Budget Ledger ${tag}`,
     body: `## Novità e Aggiornamenti ${tag}\n\n` +
-      `- 📱 **Supporto iOS e AltStore**: pacchetto \`BudgetApp-${version}.ipa\` per installazione nativa tramite AltStore e Sideloadly.\n` +
       `- 📥 **Importazione Universale Flessibile**: supporto completo per Apple Numbers (\`.numbers\`), PDF bancari (\`.pdf\`), Excel e CSV.\n` +
       `- 🛡️ **Persistenza e Sicurezza Dati**: archiviazione protetta nella cartella utente di sistema e compatibilità cloud.\n\n` +
       `### Asset disponibili per il download:\n` +
-      `- \`BudgetingMacApp-${version}-mac.zip\` (Applicazione per macOS)\n` +
-      `- \`BudgetApp-${version}.ipa\` (Pacchetto per iPhone / iOS)`,
+      `- \`BudgetingMacApp-${version}-mac.zip\` (Applicazione per macOS)`,
     draft: false,
     prerelease: false,
   };
@@ -73,18 +71,23 @@ async function createGitHubRelease() {
   const baseUploadUrl = uploadUrlTemplate.replace(/\{\?name,label\}$/, '');
 
   // Recupera asset già caricati per evitare duplicati
-  const existingAssets = Array.isArray(release.assets) ? release.assets.map((a) => a.name) : [];
+  const existingAssets = Array.isArray(release.assets) ? release.assets : [];
 
   // Lista degli asset da caricare
   const assetsToUpload = [
-    {
-      filePath: path.join(__dirname, `../dist-ios/BudgetApp-${version}.ipa`),
-      fileName: `BudgetApp-${version}.ipa`,
-      contentType: 'application/octet-stream',
-    },
+    // {
+    //   filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-mac.tar.gz`),
+    //   fileName: `BudgetingMacApp-${version}-mac.tar.gz`,
+    //   contentType: 'application/gzip',
+    // },
     {
       filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-mac.zip`),
       fileName: `BudgetingMacApp-${version}-mac.zip`,
+      contentType: 'application/zip',
+    },
+    {
+      filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-arm64-mac.zip`),
+      fileName: `BudgetingMacApp-${version}-arm64-mac.zip`,
       contentType: 'application/zip',
     },
     {
@@ -92,10 +95,20 @@ async function createGitHubRelease() {
       fileName: `BudgetingMacApp-${version}.dmg`,
       contentType: 'application/x-apple-diskimage',
     },
+    {
+      filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-arm64.dmg`),
+      fileName: `BudgetingMacApp-${version}-arm64.dmg`,
+      contentType: 'application/x-apple-diskimage',
+    },
+    {
+      filePath: path.join(__dirname, `../dist-electron/BudgetingMacApp-${version}-x64.dmg`),
+      fileName: `BudgetingMacApp-${version}-x64.dmg`,
+      contentType: 'application/x-apple-diskimage',
+    },
   ];
 
   for (const item of assetsToUpload) {
-    if (existingAssets.includes(item.fileName)) {
+    if (existingAssets.some((a) => a.name === item.fileName)) {
       console.log(`ℹ️ [GitHub Release] Asset ${item.fileName} già presente nella release.`);
       continue;
     }

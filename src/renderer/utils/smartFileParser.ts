@@ -1,4 +1,5 @@
-import * as XLSX from 'xlsx-clean';
+import * as XLSX from 'xlsx';
+import { isDangerousKey, sanitizeParsedObject, safeAssign } from './security';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import JSZip from 'jszip';
@@ -146,7 +147,6 @@ export function smartParseAmount(
 
   if (typeof val === 'number') {
     if (isNaN(val)) return null;
-    const kind: TransactionKind = val >= 0 ? 'income' : 'expense';
     return {
       amount: val === 0 ? 0 : (val < 0 ? val : -val), // per default se non specificato trattiamo numeri positivi in base al contesto
       kind: val >= 0 ? 'income' : 'expense',
@@ -296,34 +296,16 @@ export function inferCategory(merchant: string, fallbackKind: TransactionKind): 
  * Normalizza il nome colonna per confronto fuzzy
  */
 function cleanKey(k: string): string {
-  return String(k || '')
+  const sanitized = String(k || '')
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')
     .replace(/[^a-z0-9]+/g, '');
-}
-
-/**
- * Valuta e trova la migliore corrispondenza per una colonna
- */
-function findMatchingKey(row: Record<string, any>, possibleKeys: string[]): string | undefined {
-  const keys = Object.keys(row);
-  for (const pk of possibleKeys) {
-    const cleanPk = cleanKey(pk);
-    for (const key of keys) {
-      const ck = cleanKey(key);
-      if (ck === cleanPk) return key;
-    }
+  if (sanitized === '__proto__' || sanitized === 'constructor' || sanitized === 'prototype') {
+    return '';
   }
-  for (const pk of possibleKeys) {
-    const cleanPk = cleanKey(pk);
-    for (const key of keys) {
-      const ck = cleanKey(key);
-      if (ck.includes(cleanPk) || cleanPk.includes(ck)) return key;
-    }
-  }
-  return undefined;
+  return sanitized;
 }
 
 /**
@@ -696,10 +678,18 @@ export function parseExcelBuffer(
   if (assetsSheetName) {
     try {
       const sheet = workbook.Sheets[assetsSheetName];
-      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
-      rows.forEach((row) => {
-        const cleanRow: Record<string, any> = {};
-        Object.keys(row).forEach((k) => (cleanRow[cleanKey(k)] = row[k]));
+      const rawJson = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '' });
+      const rows: Record<string, any>[] = sanitizeParsedObject<Record<string, any>[]>(rawJson);
+      rows.forEach((row: Record<string, any>) => {
+        const cleanRow: Record<string, any> = Object.create(null);
+        Object.keys(row).forEach((k) => {
+          if (!isDangerousKey(k)) {
+            const ck = cleanKey(k);
+            if (ck && !isDangerousKey(ck)) {
+              safeAssign(cleanRow, ck, row[k]);
+            }
+          }
+        });
         const name = String(cleanRow['nome'] || cleanRow['name'] || '').trim();
         if (!name) return;
 
@@ -757,7 +747,7 @@ export function parseExcelBuffer(
   }
 
   // Converte il foglio in matrice di righe
-  const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
+  const rawRows = sanitizeParsedObject<any[][]>(XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' }));
   const result = parseGenericTableRows(rawRows, format, defaultAccount);
   result.assets = importedAssets;
   result.assetTransactions = importedAssetTxs;
@@ -1138,7 +1128,6 @@ export async function parseNumbersBuffer(
   const iwaFiles = zipContent.file(/Index\/.*\.iwa$/i);
   if (iwaFiles.length > 0) {
     const extractedStrings: string[] = [];
-    const extractedNumbers: number[] = [];
     const extractedDates: string[] = [];
 
     for (const iwa of iwaFiles.slice(0, 10)) {
