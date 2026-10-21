@@ -1,7 +1,7 @@
 const fs = require('fs');
 const https = require('https');
 
-const token = process.env.GITHUB_TOKEN || '';
+const token = process.env.GITHUB_TOKEN ||;
 const filePath = process.argv[2] || 'dist-electron/BudgetingMacApp-0.3.0-mac.zip';
 const assetName = process.argv[3] || 'BudgetingMacApp-0.3.0-mac.zip';
 const releaseId = process.argv[4] || '400424666';
