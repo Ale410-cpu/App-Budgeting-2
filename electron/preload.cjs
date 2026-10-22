@@ -16,7 +16,10 @@ contextBridge.exposeInMainWorld('budgetApp', {
   checkForUpdates: (repo, githubToken) => ipcRenderer.invoke('app:check-for-updates', repo, githubToken),
   downloadAndInstallUpdate: (options) => ipcRenderer.invoke('app:download-and-install-update', options),
   sendNotification: (payload) => ipcRenderer.invoke('app:send-notification', payload),
+  getNotificationCapability: () => ipcRenderer.invoke('app:notification-capability'),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
+  scanReceipt: () => ipcRenderer.invoke('app:scan-receipt'),
+  linkPrimaryFile: () => ipcRenderer.invoke('app:link-primary-file'),
   onUpdateProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on('app:update-progress', listener);

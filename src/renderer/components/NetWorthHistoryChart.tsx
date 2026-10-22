@@ -187,7 +187,7 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
               style={{
                 fontSize: '0.8rem',
                 fontWeight: 650,
-                color: diffVal >= 0 ? '#10b981' : '#f43f5e',
+                color: diffVal >= 0 ? 'var(--chart-positive)' : 'var(--chart-negative)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '2px',
@@ -231,21 +231,21 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
       {/* Breakdown stat pills */}
       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', marginTop: '14px', marginBottom: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#38bdf8' }} />
+          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-2)' }} />
           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
             Liquidità: <strong style={{ color: 'var(--text)' }}>{formatEuro(lastPoint.cash)}</strong>
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#c084fc' }} />
+          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-3)' }} />
           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
             Investimenti: <strong style={{ color: 'var(--text)' }}>{formatEuro(lastPoint.investments)}</strong>
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#10b981' }} />
+          <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-positive)' }} />
           <span style={{ fontSize: '0.8rem', color: 'var(--muted)' }}>
-            Crescita media mensile: <strong style={{ color: '#10b981' }}>+{formatEuro(monthlyAvgGrowth)}/mese</strong>
+            Crescita media mensile: <strong style={{ color: 'var(--chart-positive)' }}>+{formatEuro(monthlyAvgGrowth)}/mese</strong>
           </span>
         </div>
       </div>
@@ -260,8 +260,8 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
         >
           <defs>
             <linearGradient id="nw-gradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity={0.25} />
-              <stop offset="100%" stopColor="#10b981" stopOpacity={0.0} />
+              <stop offset="0%" stopColor="var(--chart-positive)" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="var(--chart-positive)" stopOpacity={0.0} />
             </linearGradient>
           </defs>
 
@@ -283,13 +283,13 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
           <path d={totalAreaPathData} fill="url(#nw-gradient)" />
 
           {/* Cash line */}
-          <path d={cashPathData} fill="none" stroke="#38bdf8" strokeWidth={1.8} strokeDasharray="4 2" opacity={0.7} />
+          <path d={cashPathData} fill="none" stroke="var(--chart-2)" strokeWidth={1.8} strokeDasharray="4 2" opacity={0.7} />
 
           {/* Investments line */}
-          <path d={investPathData} fill="none" stroke="#c084fc" strokeWidth={1.8} strokeDasharray="4 2" opacity={0.7} />
+          <path d={investPathData} fill="none" stroke="var(--chart-3)" strokeWidth={1.8} strokeDasharray="4 2" opacity={0.7} />
 
           {/* Total Net Worth main line */}
-          <path d={totalPathData} fill="none" stroke="#10b981" strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round" />
+          <path d={totalPathData} fill="none" stroke="var(--chart-positive)" strokeWidth={2.8} strokeLinecap="round" strokeLinejoin="round" />
 
           {/* Points & Interactive circles */}
           {timelineData.map((pt, idx) => {
@@ -301,14 +301,14 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
               <g key={`pt-${idx}`}>
                 {/* Vertical guide when hovered */}
                 {isHovered && (
-                  <line x1={x} y1={paddingY} x2={x} y2={svgHeight - paddingY} stroke="rgba(255,255,255,0.25)" strokeDasharray="2 2" />
+                  <line x1={x} y1={paddingY} x2={x} y2={svgHeight - paddingY} stroke="var(--border-strong)" strokeDasharray="2 2" />
                 )}
 
                 <circle
                   cx={x}
                   cy={y}
                   r={isHovered ? 6 : 3.5}
-                  fill="#10b981"
+                  fill="var(--chart-positive)"
                   stroke="var(--panel-strong)"
                   strokeWidth={2}
                   style={{ cursor: 'pointer', transition: 'r 0.15s ease' }}
@@ -338,7 +338,7 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
               background: 'var(--panel-strong)',
               borderRadius: '10px',
               border: '1px solid var(--border)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              boxShadow: 'var(--shadow-md)',
               fontSize: '0.78rem',
               display: 'flex',
               flexDirection: 'column',
@@ -352,15 +352,15 @@ export const NetWorthHistoryChart: React.FC<NetWorthHistoryChartProps> = ({
             </strong>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
               <span style={{ color: 'var(--muted)' }}>Liquidità:</span>
-              <strong style={{ color: '#38bdf8' }}>{formatEuro(hoveredPoint.cash)}</strong>
+              <strong style={{ color: 'var(--chart-2)' }}>{formatEuro(hoveredPoint.cash)}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px' }}>
               <span style={{ color: 'var(--muted)' }}>Asset Investiti:</span>
-              <strong style={{ color: '#c084fc' }}>{formatEuro(hoveredPoint.investments)}</strong>
+              <strong style={{ color: 'var(--chart-3)' }}>{formatEuro(hoveredPoint.investments)}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', borderTop: '1px solid var(--border)', paddingTop: '3px' }}>
               <span style={{ color: 'var(--text)', fontWeight: 600 }}>Patrimonio Totale:</span>
-              <strong style={{ color: '#10b981' }}>{formatEuro(hoveredPoint.total)}</strong>
+              <strong style={{ color: 'var(--chart-positive)' }}>{formatEuro(hoveredPoint.total)}</strong>
             </div>
           </div>
         )}

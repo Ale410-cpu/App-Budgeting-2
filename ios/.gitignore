@@ -1,0 +1,14 @@
+# Build artifacts
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+
+# Il bundle web e' generato da `npm run ios:sync` (non va versionato)
+BudgetApp/Resources/web/*
+!BudgetApp/Resources/web/.gitkeep
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+*.xcworkspace/xcuserdata/

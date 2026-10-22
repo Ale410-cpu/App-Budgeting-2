@@ -16,15 +16,25 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "npm run build:ocr && vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:ocr": "mkdir -p electron/bin && cat scripts/receipt-ocr.swift ios/BudgetApp/Bridge/ReceiptOCR.swift > /tmp/receipt-ocr-build.swift && swiftc -O /tmp/receipt-ocr-build.swift -o electron/bin/receipt-ocr",
+    "test:receipt": "tsx scripts/test-receipt-parser.ts",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "check": "tsc --noEmit",
     "lint": "tsc --noEmit",
+    "audit:tokens": "python3 scripts/audit_tokens.py",
     "package": "npm run build && electron-builder",
     "package:mac": "npm run build && electron-builder --mac dmg",
     "package:mac:catalina": "npm run build && electron-builder --mac --config.mac.minimumSystemVersion=10.15.0 --config.electronVersion=26.6.9",
     "package:dir": "npm run build && electron-builder --dir",
+    "package:mac:unsigned": "npm run build && electron-builder --mac --dir -c.mac.identity=null",
+    "ios:sync": "node scripts/build-ipa.cjs --sync-only",
+    "package:ios": "node scripts/build-ipa.cjs",
+    "package:ios:signed": "node scripts/build-ipa.cjs --team",
+    "package:ios:source": "node scripts/build-ipa.cjs --source-only",
+    "icons": "swift scripts/generate-icons.swift && python3 scripts/build_favicon_ico.py",
+    "test:notification": "node scripts/test-notification.mjs",
     "release:github": "node scripts/create-release.cjs"
   },
   "dependencies": {
@@ -64,6 +74,9 @@
       "buildResources": "build",
       "output": "dist-electron"
     },
+    "asarUnpack": [
+      "electron/bin/**"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -73,8 +86,11 @@
     ],
     "mac": {
       "category": "public.app-category.finance",
-      "icon": "build/icon.png",
+      "icon": "build/icon.icns",
       "minimumSystemVersion": "10.15.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         {
           "target": "dmg",

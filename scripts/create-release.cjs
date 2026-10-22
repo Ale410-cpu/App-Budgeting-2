@@ -105,6 +105,19 @@ async function createGitHubRelease() {
       fileName: `BudgetingMacApp-${version}-x64.dmg`,
       contentType: 'application/x-apple-diskimage',
     },
+    // Pacchetto iOS (sideloading via AltStore / Sideloadly).
+    {
+      filePath: path.join(__dirname, `../dist-ios/BudgetApp-${version}.ipa`),
+      fileName: `BudgetApp-${version}.ipa`,
+      contentType: 'application/octet-stream',
+    },
+    // Progetto Xcode: per chi vuole firmare l'app in proprio con il proprio
+    // ID Apple (nessun costo, nessun account Developer a pagamento).
+    {
+      filePath: path.join(__dirname, `../dist-ios/BudgetApp-${version}-xcode.zip`),
+      fileName: `BudgetApp-${version}-xcode.zip`,
+      contentType: 'application/zip',
+    },
   ];
 
   for (const item of assetsToUpload) {

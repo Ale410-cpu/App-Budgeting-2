@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import {
   getNotificationSupportStatus,
+  getNativeNotificationCapability,
   loadNotificationSettings,
   saveNotificationSettings,
   loadNotificationHistory,
@@ -28,6 +29,8 @@ import {
   sendTestTransactionReminder,
   AppNotification,
   NotificationSettings,
+  NativeNotificationCapability,
+  NotificationChannel,
 } from '../utils/notificationService';
 import { APP_VERSION } from '../../version';
 
@@ -37,12 +40,30 @@ interface NotificationModalProps {
   theme?: 'light' | 'dark';
 }
 
+/**
+ * Human readable summary of where the notification was delivered.
+ * On macOS the destination is the system Notification Center, never the app window.
+ */
+function describeDelivery(channel: NotificationChannel | undefined, deliveredToSystem?: boolean): string {
+  if (deliveredToSystem && channel === 'native') {
+    return 'Notifica di sistema inviata: è comparsa nel Centro Notifiche di macOS (icona in alto a destra).';
+  }
+  if (deliveredToSystem && channel === 'applescript') {
+    return 'Notifica di sistema inviata: è comparsa nel Centro Notifiche di macOS (canale compatibile, l\'app non è firmata).';
+  }
+  if (deliveredToSystem) {
+    return 'Notifica inviata al sistema operativo.';
+  }
+  return 'Il sistema non ha potuto mostrare la notifica: verifica in Impostazioni di sistema → Notifiche che BudgetingMacApp sia consentito.';
+}
+
 export const NotificationModal: React.FC<NotificationModalProps> = ({
   isOpen,
   onClose,
   theme,
 }) => {
   const [supportStatus, setSupportStatus] = useState(getNotificationSupportStatus());
+  const [capability, setCapability] = useState<NativeNotificationCapability | null>(null);
   const [settings, setSettings] = useState<NotificationSettings>(loadNotificationSettings());
   const [history, setHistory] = useState<AppNotification[]>([]);
   const [feedbackMessage, setFeedbackMessage] = useState<string>('');
@@ -61,6 +82,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
       setSettings(loadNotificationSettings());
       setHistory(loadNotificationHistory());
       setFeedbackMessage('');
+      getNativeNotificationCapability().then(setCapability);
     }
   }, [isOpen]);
 
@@ -108,20 +130,16 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
       }
 
       const res = await sendAppNotification({
-        title: '🔔 Test Notifica - Registro Budget',
+        title: 'Test notifica — Registro Budget',
         body: `Le notifiche funzionano su ${supportStatus.platformLabel}! Riceverai avvisi su budget, promemoria e scadenze.`,
         category: 'system',
       });
 
       if (res.success) {
-        if (res.deliveredToSystem) {
-          setFeedbackMessage('✅ Notifica inviata! Banner visibile a schermo e nel Centro Notifiche di sistema.');
-        } else {
-          setFeedbackMessage('✅ Notifica generata! È visibile come banner a schermo (per il Centro Notifiche di sistema, attiva l\'autorizzazione in alto).');
-        }
+        setFeedbackMessage(describeDelivery(res.channel, res.deliveredToSystem));
         setHistory(loadNotificationHistory());
       } else {
-        setFeedbackMessage(`⚠️ ${res.error || 'Invio notifica non riuscito.'}`);
+        setFeedbackMessage(`${res.error || 'Invio notifica non riuscito.'}`);
       }
     } catch (err: any) {
       setFeedbackMessage(`Errore invio notifica: ${err?.message || err}`);
@@ -141,10 +159,10 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
       const res = await sendTestTransactionReminder();
       if (res.success) {
-        setFeedbackMessage('✅ Promemoria inviato! Controlla il banner a schermo e il Centro Notifiche.');
+        setFeedbackMessage(describeDelivery(res.channel, res.deliveredToSystem));
         setHistory(loadNotificationHistory());
       } else {
-        setFeedbackMessage(`⚠️ ${res.error || 'Invio promemoria non riuscito.'}`);
+        setFeedbackMessage(`${res.error || 'Invio promemoria non riuscito.'}`);
       }
     } catch (err: any) {
       setFeedbackMessage(`Errore invio promemoria: ${err?.message || err}`);
@@ -167,7 +185,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: isLight ? 'rgba(15, 23, 42, 0.45)' : 'rgba(0, 0, 0, 0.65)',
+        backgroundColor: 'var(--scrim)',
         backdropFilter: 'blur(8px)',
         WebkitBackdropFilter: 'blur(8px)',
         display: 'flex',
@@ -186,21 +204,17 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
       <div
         className={`notification-modal-card ${isLight ? 'notification-modal-card-light' : ''}`}
         style={{
-          backgroundColor: isLight ? '#ffffff' : 'var(--panel-strong, #0f172a)',
-          background: isLight ? '#ffffff' : 'var(--panel-strong, #0f172a)',
-          border: isLight
-            ? '1px solid rgba(148, 163, 184, 0.35)'
-            : '1px solid var(--border, rgba(148, 163, 184, 0.25))',
+          backgroundColor: 'var(--panel-strong)',
+          background: 'var(--panel-strong)',
+          border: '1px solid var(--border-strong)',
           borderRadius: '22px',
           width: '100%',
           maxWidth: '700px',
           maxHeight: '90vh',
           display: 'flex',
           flexDirection: 'column',
-          boxShadow: isLight
-            ? '0 25px 60px -15px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(148, 163, 184, 0.2)'
-            : '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border)',
-          color: isLight ? '#0f172a' : 'var(--text, #0f172a)',
+          boxShadow: 'var(--shadow-lg)',
+          color: 'var(--text)',
           overflow: 'hidden',
           animation: 'fadeInScale 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
@@ -211,13 +225,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           className="notification-modal-header"
           style={{
             padding: '18px 24px',
-            borderBottom: isLight
-              ? '1px solid rgba(148, 163, 184, 0.25)'
-              : '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+            borderBottom: '1px solid var(--border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
+            background: 'var(--bg-soft)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -226,12 +238,12 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                 width: '42px',
                 height: '42px',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#ffffff',
-                boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+                color: 'var(--on-solid)',
+                boxShadow: 'var(--shadow-accent)',
                 flexShrink: 0,
               }}
             >
@@ -239,7 +251,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: isLight ? '#0f172a' : 'var(--text)' }}>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text)' }}>
                   Centro Notifiche
                 </h3>
                 <span
@@ -248,15 +260,15 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                     padding: '2px 8px',
                     borderRadius: '999px',
                     fontWeight: 600,
-                    background: isGranted ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)',
-                    color: isGranted ? '#16a34a' : '#d97706',
-                    border: `1px solid ${isGranted ? 'rgba(34, 197, 94, 0.35)' : 'rgba(234, 179, 8, 0.35)'}`,
+                    background: isGranted ? 'var(--success-soft)' : 'var(--warning-soft)',
+                    color: isGranted ? 'var(--success)' : 'var(--warning)',
+                    border: `1px solid ${isGranted ? 'var(--success-border)' : 'var(--warning-border)'}`,
                   }}
                 >
                   {supportStatus.platformLabel}
                 </span>
               </div>
-              <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: isLight ? '#475569' : 'var(--muted)' }}>
+              <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--muted)' }}>
                 Avvisi per superamento budget, spese ricorrenti e promemoria transazioni (macOS)
               </p>
             </div>
@@ -273,11 +285,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
             aria-label="Chiudi finestra notifiche"
             title="Chiudi (Esc)"
             style={{
-              background: isLight ? '#ffffff' : 'var(--overlay-medium, rgba(148, 163, 184, 0.15))',
-              border: isLight
-                ? '1px solid rgba(148, 163, 184, 0.4)'
-                : '1px solid var(--border, rgba(148, 163, 184, 0.25))',
-              color: isLight ? '#0f172a' : 'var(--text, #0f172a)',
+              background: 'var(--overlay-medium)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text)',
               cursor: 'pointer',
               width: '36px',
               height: '36px',
@@ -287,7 +297,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               justifyContent: 'center',
               transition: 'all 0.15s ease',
               flexShrink: 0,
-              boxShadow: isLight ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+              boxShadow: isLight ? 'var(--shadow-xs)' : 'none',
             }}
           >
             <X size={18} strokeWidth={2.5} />
@@ -300,11 +310,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           style={{
             display: 'flex',
             padding: '8px 24px 0',
-            borderBottom: isLight
-              ? '1px solid rgba(148, 163, 184, 0.25)'
-              : '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+            borderBottom: '1px solid var(--border)',
             gap: '8px',
-            background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.01))',
+            background: 'var(--bg-soft)',
           }}
         >
           <button
@@ -314,8 +322,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               padding: '10px 16px',
               border: 'none',
               background: 'transparent',
-              borderBottom: activeTab === 'settings' ? '2px solid #0ea5e9' : '2px solid transparent',
-              color: activeTab === 'settings' ? '#0ea5e9' : isLight ? '#475569' : 'var(--muted)',
+              borderBottom: activeTab === 'settings' ? '2px solid var(--info)' : '2px solid transparent',
+              color: activeTab === 'settings' ? 'var(--info)' : 'var(--muted)',
               fontWeight: activeTab === 'settings' ? 700 : 500,
               fontSize: '0.86rem',
               cursor: 'pointer',
@@ -334,8 +342,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               padding: '10px 16px',
               border: 'none',
               background: 'transparent',
-              borderBottom: activeTab === 'guide' ? '2px solid #0ea5e9' : '2px solid transparent',
-              color: activeTab === 'guide' ? '#0ea5e9' : isLight ? '#475569' : 'var(--muted)',
+              borderBottom: activeTab === 'guide' ? '2px solid var(--info)' : '2px solid transparent',
+              color: activeTab === 'guide' ? 'var(--info)' : 'var(--muted)',
               fontWeight: activeTab === 'guide' ? 700 : 500,
               fontSize: '0.86rem',
               cursor: 'pointer',
@@ -354,8 +362,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               padding: '10px 16px',
               border: 'none',
               background: 'transparent',
-              borderBottom: activeTab === 'history' ? '2px solid #0ea5e9' : '2px solid transparent',
-              color: activeTab === 'history' ? '#0ea5e9' : isLight ? '#475569' : 'var(--muted)',
+              borderBottom: activeTab === 'history' ? '2px solid var(--info)' : '2px solid transparent',
+              color: activeTab === 'history' ? 'var(--info)' : 'var(--muted)',
               fontWeight: activeTab === 'history' ? 700 : 500,
               fontSize: '0.86rem',
               cursor: 'pointer',
@@ -379,7 +387,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
             display: 'flex',
             flexDirection: 'column',
             gap: '16px',
-            background: isLight ? '#ffffff' : 'transparent',
+            background: 'transparent',
           }}
         >
           {/* Feedback Banner */}
@@ -388,9 +396,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               style={{
                 padding: '10px 14px',
                 borderRadius: '10px',
-                background: isLight ? 'rgba(14, 165, 233, 0.12)' : 'rgba(14, 165, 233, 0.12)',
-                border: '1px solid rgba(14, 165, 233, 0.35)',
-                color: '#0284c7',
+                background: 'var(--info-soft)',
+                border: '1px solid var(--info-border)',
+                color: 'var(--info)',
                 fontSize: '0.84rem',
                 fontWeight: 600,
                 display: 'flex',
@@ -409,16 +417,16 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               <div
                 style={{
                   background: isGranted
-                    ? isLight ? 'rgba(34, 197, 94, 0.12)' : 'rgba(34, 197, 94, 0.08)'
+                    ? 'var(--success-soft)'
                     : isDenied
-                    ? isLight ? 'rgba(239, 68, 68, 0.12)' : 'rgba(239, 68, 68, 0.08)'
-                    : isLight ? 'rgba(234, 179, 8, 0.12)' : 'rgba(234, 179, 8, 0.08)',
+                    ? 'var(--danger-soft)'
+                    : 'var(--warning-soft)',
                   border: `1px solid ${
                     isGranted
-                      ? 'rgba(34, 197, 94, 0.35)'
+                      ? 'var(--success-border)'
                       : isDenied
-                      ? 'rgba(239, 68, 68, 0.35)'
-                      : 'rgba(234, 179, 8, 0.35)'
+                      ? 'var(--danger-border)'
+                      : 'var(--warning-border)'
                   }`,
                   borderRadius: '14px',
                   padding: '16px',
@@ -431,21 +439,21 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   {isGranted ? (
-                    <CheckCircle2 size={24} color="#16a34a" />
+                    <CheckCircle2 size={24} color="var(--success)" />
                   ) : isDenied ? (
-                    <AlertTriangle size={24} color="#dc2626" />
+                    <AlertTriangle size={24} color="var(--danger)" />
                   ) : (
-                    <BellRing size={24} color="#d97706" />
+                    <BellRing size={24} color="var(--warning)" />
                   )}
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: isLight ? '#0f172a' : 'var(--text)' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)' }}>
                       {isGranted
                         ? 'Notifiche Attive e Autorizzate'
                         : isDenied
                         ? 'Notifiche Bloccate a livello di Sistema'
                         : 'Autorizzazione Notifiche Richiesta'}
                     </div>
-                    <div style={{ fontSize: '0.78rem', color: isLight ? '#475569' : 'var(--muted)', marginTop: '2px' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '2px' }}>
                       {isGranted
                         ? `Le notifiche sono pronte per la ricezione (${supportStatus.platformLabel}).`
                         : isDenied
@@ -460,8 +468,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                     type="button"
                     onClick={handleRequestPermission}
                     style={{
-                      background: 'linear-gradient(135deg, #0ea5e9, #38bdf8)',
-                      color: '#ffffff',
+                      background: 'var(--info)',
+                      color: 'var(--on-solid)',
                       fontWeight: 700,
                       border: 'none',
                       borderRadius: '10px',
@@ -471,7 +479,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
-                      boxShadow: '0 2px 8px rgba(14, 165, 233, 0.3)',
+                      boxShadow: 'var(--shadow-accent)',
                     }}
                   >
                     <ShieldCheck size={16} /> Richiedi Autorizzazione
@@ -482,10 +490,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               {/* Preferences Toggles */}
               <div
                 style={{
-                  background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
-                  border: isLight
-                    ? '1px solid rgba(148, 163, 184, 0.28)'
-                    : '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+                  background: 'var(--bg-soft)',
+                  border: '1px solid var(--border)',
                   borderRadius: '14px',
                   padding: '16px',
                   display: 'flex',
@@ -493,23 +499,23 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   gap: '14px',
                 }}
               >
-                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: isLight ? '#334155' : 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Preferenze di Ricezione
                 </div>
 
                 {/* Master switch */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: isLight ? '#0f172a' : 'var(--text)' }}>Abilita Notifiche Generali</div>
-                    <div style={{ fontSize: '0.75rem', color: isLight ? '#475569' : 'var(--muted)' }}>Interruttore generale per tutti gli avvisi dell'app</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--text)' }}>Abilita Notifiche Generali</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Interruttore generale per tutti gli avvisi dell'app</div>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleToggleSetting('enabled')}
                     style={{
-                      background: settings.enabled ? '#0ea5e9' : isLight ? '#ffffff' : 'var(--input-bg)',
-                      color: settings.enabled ? '#ffffff' : isLight ? '#475569' : 'var(--muted)',
-                      border: `1px solid ${settings.enabled ? '#0284c7' : isLight ? 'rgba(148, 163, 184, 0.35)' : 'var(--border)'}`,
+                      background: settings.enabled ? 'var(--info)' : 'var(--input-bg)',
+                      color: settings.enabled ? 'var(--on-solid)' : 'var(--muted)',
+                      border: `1px solid ${settings.enabled ? 'var(--info)' : 'var(--border-strong)'}`,
                       borderRadius: '20px',
                       padding: '4px 14px',
                       fontSize: '0.78rem',
@@ -521,18 +527,18 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   </button>
                 </div>
 
-                <div style={{ height: '1px', background: isLight ? 'rgba(148, 163, 184, 0.2)' : 'var(--border)' }} />
+                <div style={{ height: '1px', background: 'var(--border)' }} />
 
                 {/* Periodic transaction reminder switch & interval */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Clock size={16} color="#0284c7" />
+                      <Clock size={16} color="var(--info)" />
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.86rem', color: isLight ? '#0f172a' : 'var(--text)' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>
                           Promemoria Aggiornamento Transazioni
                         </div>
-                        <div style={{ fontSize: '0.74rem', color: isLight ? '#475569' : 'var(--muted)' }}>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
                           Ricorda periodicamente di registrare gli ultimi scontrini, uscite o bonifici
                         </div>
                       </div>
@@ -541,9 +547,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                       type="button"
                       onClick={() => handleToggleSetting('transactionReminderEnabled')}
                       style={{
-                        background: settings.transactionReminderEnabled ? '#10b981' : isLight ? '#ffffff' : 'var(--input-bg)',
-                        color: settings.transactionReminderEnabled ? '#ffffff' : isLight ? '#475569' : 'var(--muted)',
-                        border: `1px solid ${settings.transactionReminderEnabled ? '#059669' : isLight ? 'rgba(148, 163, 184, 0.35)' : 'var(--border)'}`,
+                        background: settings.transactionReminderEnabled ? 'var(--success)' : 'var(--input-bg)',
+                        color: settings.transactionReminderEnabled ? 'var(--on-solid)' : 'var(--muted)',
+                        border: `1px solid ${settings.transactionReminderEnabled ? 'var(--success-strong)' : 'var(--border-strong)'}`,
                         borderRadius: '20px',
                         padding: '4px 12px',
                         fontSize: '0.76rem',
@@ -566,11 +572,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                         gap: '8px',
                         padding: '8px 12px',
                         borderRadius: '10px',
-                        background: isLight ? '#f1f5f9' : 'var(--overlay-medium, rgba(148, 163, 184, 0.1))',
-                        border: isLight ? '1px solid rgba(148, 163, 184, 0.28)' : '1px solid var(--border)',
+                        background: 'var(--overlay-medium)',
+                        border: '1px solid var(--border)',
                       }}
                     >
-                      <span style={{ fontSize: '0.76rem', color: isLight ? '#0f172a' : 'var(--text)', fontWeight: 600 }}>
+                      <span style={{ fontSize: '0.76rem', color: 'var(--text)', fontWeight: 600 }}>
                         Frequenza del promemoria:
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -578,9 +584,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                           value={settings.transactionReminderIntervalHours || 24}
                           onChange={(e) => handleChangeInterval(parseInt(e.target.value, 10))}
                           style={{
-                            background: isLight ? '#ffffff' : 'var(--input-bg, #ffffff)',
-                            color: isLight ? '#0f172a' : 'var(--text, #0f172a)',
-                            border: isLight ? '1px solid rgba(148, 163, 184, 0.35)' : '1px solid var(--border)',
+                            background: 'var(--input-bg)',
+                            color: 'var(--text)',
+                            border: '1px solid var(--border-strong)',
                             borderRadius: '8px',
                             padding: '4px 8px',
                             fontSize: '0.76rem',
@@ -600,9 +606,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                           disabled={isTestingReminder}
                           title="Invia subito una notifica di promemoria transazioni per testarla"
                           style={{
-                            background: isLight ? '#ffffff' : 'var(--input-bg)',
-                            color: '#0284c7',
-                            border: isLight ? '1px solid rgba(148, 163, 184, 0.35)' : '1px solid var(--border)',
+                            background: 'var(--input-bg)',
+                            color: 'var(--info)',
+                            border: '1px solid var(--border-strong)',
                             borderRadius: '8px',
                             padding: '4px 8px',
                             fontSize: '0.72rem',
@@ -620,24 +626,24 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   )}
                 </div>
 
-                <div style={{ height: '1px', background: isLight ? 'rgba(148, 163, 184, 0.2)' : 'var(--border)' }} />
+                <div style={{ height: '1px', background: 'var(--border)' }} />
 
                 {/* Budget Alert toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <DollarSign size={16} color="#d97706" />
+                    <DollarSign size={16} color="var(--warning)" />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: isLight ? '#0f172a' : 'var(--text)' }}>Avvisi Superamento Budget</div>
-                      <div style={{ fontSize: '0.74rem', color: isLight ? '#475569' : 'var(--muted)' }}>Notifica quando una categoria raggiunge l'80% o il 100% del limite</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>Avvisi Superamento Budget</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>Notifica quando una categoria raggiunge l'80% o il 100% del limite</div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleToggleSetting('budgetAlerts')}
                     style={{
-                      background: settings.budgetAlerts ? '#10b981' : isLight ? '#ffffff' : 'var(--input-bg)',
-                      color: settings.budgetAlerts ? '#ffffff' : isLight ? '#475569' : 'var(--muted)',
-                      border: `1px solid ${settings.budgetAlerts ? '#059669' : isLight ? 'rgba(148, 163, 184, 0.35)' : 'var(--border)'}`,
+                      background: settings.budgetAlerts ? 'var(--success)' : 'var(--input-bg)',
+                      color: settings.budgetAlerts ? 'var(--on-solid)' : 'var(--muted)',
+                      border: `1px solid ${settings.budgetAlerts ? 'var(--success-strong)' : 'var(--border-strong)'}`,
                       borderRadius: '20px',
                       padding: '4px 12px',
                       fontSize: '0.76rem',
@@ -649,24 +655,24 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   </button>
                 </div>
 
-                <div style={{ height: '1px', background: isLight ? 'rgba(148, 163, 184, 0.2)' : 'var(--border)' }} />
+                <div style={{ height: '1px', background: 'var(--border)' }} />
 
                 {/* Recurring Reminders toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Calendar size={16} color="#0ea5e9" />
+                    <Calendar size={16} color="var(--info)" />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: isLight ? '#0f172a' : 'var(--text)' }}>Promemoria Scadenze &amp; Ricorrenti</div>
-                      <div style={{ fontSize: '0.74rem', color: isLight ? '#475569' : 'var(--muted)' }}>Avviso il giorno della scadenza di abbonamenti e uscite periodiche</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>Promemoria Scadenze &amp; Ricorrenti</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>Avviso il giorno della scadenza di abbonamenti e uscite periodiche</div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleToggleSetting('recurringReminders')}
                     style={{
-                      background: settings.recurringReminders ? '#10b981' : isLight ? '#ffffff' : 'var(--input-bg)',
-                      color: settings.recurringReminders ? '#ffffff' : isLight ? '#475569' : 'var(--muted)',
-                      border: `1px solid ${settings.recurringReminders ? '#059669' : isLight ? 'rgba(148, 163, 184, 0.35)' : 'var(--border)'}`,
+                      background: settings.recurringReminders ? 'var(--success)' : 'var(--input-bg)',
+                      color: settings.recurringReminders ? 'var(--on-solid)' : 'var(--muted)',
+                      border: `1px solid ${settings.recurringReminders ? 'var(--success-strong)' : 'var(--border-strong)'}`,
                       borderRadius: '20px',
                       padding: '4px 12px',
                       fontSize: '0.76rem',
@@ -678,24 +684,24 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   </button>
                 </div>
 
-                <div style={{ height: '1px', background: isLight ? 'rgba(148, 163, 184, 0.2)' : 'var(--border)' }} />
+                <div style={{ height: '1px', background: 'var(--border)' }} />
 
                 {/* Sound chime toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {settings.soundEnabled ? <Volume2 size={16} color="#8b5cf6" /> : <VolumeX size={16} color={isLight ? '#64748b' : 'var(--muted)'} />}
+                    {settings.soundEnabled ? <Volume2 size={16} color="var(--chart-3)" /> : <VolumeX size={16} color="var(--muted)" />}
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: isLight ? '#0f172a' : 'var(--text)' }}>Suono Notifica Discreto</div>
-                      <div style={{ fontSize: '0.74rem', color: isLight ? '#475569' : 'var(--muted)' }}>Tono discreto ad ogni arrivo dell'avviso</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>Suono Notifica Discreto</div>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>Tono discreto ad ogni arrivo dell'avviso</div>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleToggleSetting('soundEnabled')}
                     style={{
-                      background: settings.soundEnabled ? '#8b5cf6' : isLight ? '#ffffff' : 'var(--input-bg)',
-                      color: settings.soundEnabled ? '#ffffff' : isLight ? '#475569' : 'var(--muted)',
-                      border: `1px solid ${settings.soundEnabled ? '#7c3aed' : isLight ? 'rgba(148, 163, 184, 0.35)' : 'var(--border)'}`,
+                      background: settings.soundEnabled ? 'var(--chart-3)' : 'var(--input-bg)',
+                      color: settings.soundEnabled ? 'var(--on-solid)' : 'var(--muted)',
+                      border: `1px solid ${settings.soundEnabled ? 'var(--chart-3)' : 'var(--border-strong)'}`,
                       borderRadius: '20px',
                       padding: '4px 12px',
                       fontSize: '0.76rem',
@@ -711,12 +717,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
               {/* Test Button Card */}
               <div
                 style={{
-                  background: isLight
-                    ? 'linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(99, 102, 241, 0.12))'
-                    : 'linear-gradient(135deg, rgba(14, 165, 233, 0.08), rgba(99, 102, 241, 0.08))',
-                  border: isLight
-                    ? '1px solid rgba(14, 165, 233, 0.35)'
-                    : '1px solid rgba(14, 165, 233, 0.25)',
+                  background: 'var(--info-soft)',
+                  border: '1px solid var(--info-border)',
                   borderRadius: '14px',
                   padding: '16px',
                   display: 'flex',
@@ -727,9 +729,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: isLight ? '#0f172a' : 'var(--text)' }}>Verifica Immediata Notifiche</div>
-                  <div style={{ fontSize: '0.78rem', color: isLight ? '#475569' : 'var(--muted)' }}>
-                    Invia subito un avviso di prova su {supportStatus.platformLabel} per testare banner e suono
+                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--text)' }}>Verifica Immediata Notifiche</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
+                    Invia subito un avviso di prova su {supportStatus.platformLabel} per testare il canale di sistema
                   </div>
                 </div>
 
@@ -738,8 +740,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   onClick={handleSendTestNotification}
                   disabled={isTesting}
                   style={{
-                    background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
-                    color: '#ffffff',
+                    background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
+                    color: 'var(--on-solid)',
                     fontWeight: 700,
                     border: 'none',
                     borderRadius: '10px',
@@ -749,7 +751,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
-                    boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+                    boxShadow: 'var(--shadow-accent)',
                   }}
                 >
                   <Send size={15} /> {isTesting ? 'Invio in corso...' : 'Invia Notifica di Prova'}
@@ -762,23 +764,24 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div
                 style={{
-                  background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
-                  border: isLight
-                    ? '1px solid rgba(148, 163, 184, 0.28)'
-                    : '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+                  background: 'var(--bg-soft)',
+                  border: '1px solid var(--border)',
                   borderRadius: '14px',
                   padding: '18px',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                  <Laptop size={20} color="#0ea5e9" />
-                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: isLight ? '#0f172a' : 'var(--text)' }}>
+                  <Laptop size={20} color="var(--info)" />
+                  <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>
                     Come funzionano le notifiche su macOS
                   </span>
                 </div>
-                <div style={{ fontSize: '0.84rem', lineHeight: 1.6, color: isLight ? '#1e293b' : 'var(--text)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '0.84rem', lineHeight: 1.6, color: 'var(--text)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <p style={{ margin: 0 }}>
-                    • <strong>App Desktop nativa macOS</strong>: Le notifiche compaiono in alto a destra nel Centro Notifiche di macOS con suono di sistema e badge dell'applicazione.
+                    • <strong>Notifiche di sistema</strong>: gli avvisi arrivano sul Mac, nel Centro Notifiche (icona in alto a destra), con suono di sistema e badge dell'app. Cliccando si apre la finestra dell'app.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    • <strong>Niente banner dentro l'app</strong>: l'app non duplica le notifiche in sovrapposizione, perché sono già arrivate al sistema.
                   </p>
                   <p style={{ margin: 0 }}>
                     • <strong>Safari / Chrome su Mac</strong>: Quando richiesto, premi "Consenti" per abilitare la ricezione dei banner.
@@ -797,7 +800,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           {activeTab === 'history' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.82rem', color: isLight ? '#475569' : 'var(--muted)' }}>
+                <span style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
                   Ultime {history.length} notifiche registrate:
                 </span>
                 {history.length > 0 && (
@@ -807,7 +810,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#dc2626',
+                      color: 'var(--danger)',
                       fontSize: '0.78rem',
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -826,11 +829,11 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   style={{
                     padding: '32px 16px',
                     textAlign: 'center',
-                    color: isLight ? '#64748b' : 'var(--muted)',
+                    color: 'var(--muted)',
                     fontSize: '0.85rem',
-                    background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
+                    background: 'var(--bg-soft)',
                     borderRadius: '12px',
-                    border: isLight ? '1px dashed rgba(148, 163, 184, 0.35)' : '1px dashed var(--border, rgba(148, 163, 184, 0.2))',
+                    border: '1px dashed var(--border-strong)',
                   }}
                 >
                   Nessuna notifica ricevuta di recente. Tocca "Invia Notifica di Prova" per testare!
@@ -843,16 +846,16 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                       style={{
                         padding: '12px 14px',
                         borderRadius: '10px',
-                        background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
-                        border: isLight ? '1px solid rgba(148, 163, 184, 0.25)' : '1px solid var(--border, rgba(148, 163, 184, 0.15))',
+                        background: 'var(--bg-soft)',
+                        border: '1px solid var(--border)',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '4px',
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 600, fontSize: '0.86rem', color: isLight ? '#0f172a' : 'var(--text)' }}>{item.title}</span>
-                        <span style={{ fontSize: '0.72rem', color: isLight ? '#64748b' : 'var(--muted)' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>{item.title}</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
                           {new Date(item.timestamp).toLocaleString('it-IT', {
                             day: '2-digit',
                             month: '2-digit',
@@ -861,7 +864,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                           })}
                         </span>
                       </div>
-                      <p style={{ margin: 0, fontSize: '0.8rem', color: isLight ? '#475569' : 'var(--muted)' }}>{item.body}</p>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted)' }}>{item.body}</p>
                     </div>
                   ))}
                 </div>
@@ -875,16 +878,14 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
           className="notification-modal-footer"
           style={{
             padding: '14px 24px',
-            borderTop: isLight
-              ? '1px solid rgba(148, 163, 184, 0.25)'
-              : '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+            borderTop: '1px solid var(--border)',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            background: isLight ? '#f8fafc' : 'var(--overlay-subtle, rgba(0, 0, 0, 0.02))',
+            background: 'var(--bg-soft)',
           }}
         >
-          <div style={{ fontSize: '0.75rem', color: isLight ? '#64748b' : 'var(--muted)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
             Versione {APP_VERSION} • Notifiche per macOS (Desktop e Web)
           </div>
           <button

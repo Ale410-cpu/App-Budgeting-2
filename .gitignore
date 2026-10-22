@@ -1,6 +1,20 @@
 node_modules/
 dist/
 dist-electron/
+dist-ios/
+dist-ios-web/
+# Icone e artefatti generati (npm run icons, build iOS)
+build/
+# Bundle web iOS rigenerato da npm run package:ios
+ios/BudgetApp/Resources/web/
+# Motore OCR compilato (npm run build:ocr)
+electron/bin/
 .env
 *.log
 .DS_Store
+
+# Tooling locale / assistenti
+.opencode/
+.claude/
+.continue/
+.cursor/

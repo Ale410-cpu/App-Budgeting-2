@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import * as XLSX from 'xlsx';
-import { Eye, EyeOff, Bell, BellRing, Smartphone, Laptop, X } from 'lucide-react';
+import { Eye, EyeOff, Bell, BellRing, Smartphone, Laptop, X, Download, Upload, Save, ScanLine } from 'lucide-react';
 import { SankeyChart } from './components/SankeyChart';
 import { NetWorthHistoryChart } from './components/NetWorthHistoryChart';
 import { AssetAllocationPanel, isAssetBondEtf, isAssetEquityEtf } from './components/AssetAllocationPanel';
@@ -10,10 +10,12 @@ import { CategoryTrendReport } from './components/CategoryTrendReport';
 import { CashbackManager, type CashbackRule, type NewAssetPayload } from './components/CashbackManager';
 import { UpdateModal } from './components/UpdateModal';
 import { ImportDataModal } from './components/ImportDataModal';
+import { ReceiptScanModal, type ReceiptDraft } from './components/ReceiptScanModal';
 import { NotificationModal } from './components/NotificationModal';
 import { APP_VERSION } from '../version';
 import { checkAndTriggerFinancialAlerts, checkTransactionReminder, type AppNotification } from './utils/notificationService';
 import { computeAssetPerformance } from './utils/assetFinancials';
+import { saveGeneratedFile } from './utils/fileSave';
 import type { ParsedTransaction } from './utils/smartFileParser';
 import type { DataFileInfo, UpdateCheckResult, UpdateProgress } from './global';
 
@@ -1581,14 +1583,14 @@ function TransactionEditor({
             style={{
               padding: '10px 14px',
               borderRadius: '12px',
-              background: 'rgba(56, 189, 248, 0.08)',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
+              background: 'var(--info-soft)',
+              border: '1px solid var(--info-border)',
               marginBottom: '14px',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
               fontSize: '0.82rem',
-              color: '#38bdf8',
+              color: 'var(--info)',
             }}
           >
             <span style={{ fontSize: '1.25rem' }}>🔄</span>
@@ -1609,8 +1611,8 @@ function TransactionEditor({
             style={{
               padding: '12px 14px',
               borderRadius: '12px',
-              background: draft.needsReimbursement ? 'rgba(245, 158, 11, 0.08)' : 'var(--overlay-subtle)',
-              border: draft.needsReimbursement ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid var(--border)',
+              background: draft.needsReimbursement ? 'var(--warning-soft)' : 'var(--overlay-subtle)',
+              border: draft.needsReimbursement ? '1px solid var(--warning-border)' : '1px solid var(--border)',
               transition: 'all 0.2s ease',
               marginBottom: '14px',
             }}
@@ -1620,11 +1622,11 @@ function TransactionEditor({
                 type="checkbox"
                 checked={draft.needsReimbursement}
                 onChange={(e) => onChange('needsReimbursement', e.target.checked)}
-                style={{ accentColor: '#f59e0b', width: '18px', height: '18px', cursor: 'pointer', marginTop: '2px' }}
+                style={{ accentColor: 'var(--warning)', width: '18px', height: '18px', cursor: 'pointer', marginTop: '2px' }}
               />
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 650, fontSize: '0.84rem', color: draft.needsReimbursement ? '#f59e0b' : 'var(--text)' }}>
+                  <span style={{ fontWeight: 650, fontSize: '0.84rem', color: draft.needsReimbursement ? 'var(--warning)' : 'var(--text)' }}>
                     ⏳ Questa spesa deve essere rimborsata
                   </span>
                   {draft.needsReimbursement && (
@@ -1633,8 +1635,8 @@ function TransactionEditor({
                         fontSize: '0.68rem',
                         padding: '1px 7px',
                         borderRadius: '6px',
-                        background: 'rgba(245, 158, 11, 0.2)',
-                        color: '#f59e0b',
+                        background: 'var(--warning-soft)',
+                        color: 'var(--warning)',
                         fontWeight: 650,
                       }}
                     >
@@ -1646,7 +1648,7 @@ function TransactionEditor({
                   Spunta questa casella se stai anticipando denaro (es. conto pagato per amici, viaggi, spese lavorative o di salute) e prevedi di ricevere un rimborso.
                 </p>
                 {draft.needsReimbursement && (
-                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(245, 158, 11, 0.2)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid var(--warning-border)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '0.74rem', color: 'var(--muted)', fontWeight: 600 }}>Scadenza concordata (opzionale):</span>
                     <input
                       type="date"
@@ -1673,8 +1675,8 @@ function TransactionEditor({
             style={{
               padding: '12px 14px',
               borderRadius: '12px',
-              background: draft.isReimbursement ? 'rgba(16, 185, 129, 0.08)' : 'var(--overlay-subtle)',
-              border: draft.isReimbursement ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid var(--border)',
+              background: draft.isReimbursement ? 'var(--success-soft)' : 'var(--overlay-subtle)',
+              border: draft.isReimbursement ? '1px solid var(--success-border)' : '1px solid var(--border)',
               transition: 'all 0.2s ease',
               marginBottom: '14px',
             }}
@@ -1705,11 +1707,11 @@ function TransactionEditor({
                     }
                   }
                 }}
-                style={{ accentColor: '#10b981', width: '18px', height: '18px', cursor: 'pointer', marginTop: '2px' }}
+                style={{ accentColor: 'var(--success)', width: '18px', height: '18px', cursor: 'pointer', marginTop: '2px' }}
               />
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 650, fontSize: '0.84rem', color: draft.isReimbursement ? '#10b981' : 'var(--text)' }}>
+                  <span style={{ fontWeight: 650, fontSize: '0.84rem', color: draft.isReimbursement ? 'var(--success)' : 'var(--text)' }}>
                     🔄 Questa entrata è un rimborso di una spesa precedente
                   </span>
                   {draft.isReimbursement && (
@@ -1718,8 +1720,8 @@ function TransactionEditor({
                         fontSize: '0.68rem',
                         padding: '1px 7px',
                         borderRadius: '6px',
-                        background: 'rgba(16, 185, 129, 0.2)',
-                        color: '#10b981',
+                        background: 'var(--success-soft)',
+                        color: 'var(--success)',
                         fontWeight: 650,
                       }}
                     >
@@ -1816,8 +1818,8 @@ function TransactionEditor({
                           style={{
                             padding: '9px 12px',
                             borderRadius: '8px',
-                            backgroundColor: 'rgba(56, 189, 248, 0.08)',
-                            border: '1px solid rgba(56, 189, 248, 0.25)',
+                            backgroundColor: 'var(--info-soft)',
+                            border: '1px solid var(--info-border)',
                             fontSize: '0.76rem',
                             display: 'flex',
                             justifyContent: 'space-between',
@@ -1835,7 +1837,7 @@ function TransactionEditor({
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>Importo spesa: <strong>{formatEuro(Math.abs(selectedExpense.amount))}</strong></div>
-                            <div style={{ fontSize: '0.76rem', color: remaining > 0 ? '#f59e0b' : '#10b981', fontWeight: 650 }}>
+                            <div style={{ fontSize: '0.76rem', color: remaining > 0 ? 'var(--warning)' : 'var(--success)', fontWeight: 650 }}>
                               {remaining > 0 ? `Restano da coprire: ${formatEuro(remaining)}` : 'Interamente rimborsata'}
                             </div>
                           </div>
@@ -1965,7 +1967,7 @@ function BudgetCategoryEditor({
                 onChange={(event) => onChange('limitPercent', event.target.value)}
                 placeholder="%"
               />
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px', display: 'block' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
                 Equivale a <strong>{formatEuro((totalMonthIncome * (Number(draft.limitPercent) || 0)) / 100)}</strong> (su {formatEuro(totalMonthIncome)} entrate)
               </span>
             </label>
@@ -2025,7 +2027,7 @@ function BudgetCategoryEditor({
                     key={subcategory.id}
                     style={{
                       gridTemplateColumns: 'minmax(0, 1.2fr) minmax(130px, 0.8fr) minmax(110px, 0.8fr) minmax(0, 1.2fr) auto',
-                      borderLeft: `4px solid ${draft.color || 'var(--primary)'}`,
+                      borderLeft: `4px solid ${draft.color || 'var(--accent)'}`,
                     }}
                   >
                     <label className="form-field">
@@ -2045,7 +2047,7 @@ function BudgetCategoryEditor({
                         style={{
                           width: '100%',
                           padding: '0.6rem',
-                          borderRadius: 'var(--radius)',
+                          borderRadius: 'var(--radius-sm)',
                           border: '1px solid var(--border)',
                           background: 'var(--panel-bg)',
                           color: 'var(--text)',
@@ -2068,7 +2070,7 @@ function BudgetCategoryEditor({
                           onChange={(event) => onSubcategoryChange(subcategory.id, 'limitPercent', event.target.value)}
                           placeholder="%"
                         />
-                        <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginTop: '2px', display: 'block' }}>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
                           ~{formatEuro((totalMonthIncome * (Number(subcategory.limitPercent) || 0)) / 100)}
                         </span>
                       </label>
@@ -2215,6 +2217,16 @@ function App() {
   }, [bgEffect]);
 
   const [platform, setPlatform] = useState<string>('macOS');
+  // La stessa app gira su macOS (Electron) e su iOS (WebView nativa): le
+  // etichette dell'interfaccia devono seguire la piattaforma reale.
+  const isIOSPlatform = platform === 'ios' || platform === 'iOS';
+  const deviceLabel = isIOSPlatform ? 'iPhone / iPad' : 'Mac';
+  const dataPanelTitle = isIOSPlatform
+    ? 'Archiviazione & Sincronizzazione File Dati (iOS & iCloud Drive)'
+    : 'Archiviazione & Sincronizzazione File Dati (macOS & iCloud Drive)';
+  const dataPanelHint = isIOSPlatform
+    ? 'I dati vengono salvati automaticamente dentro l\'app (file user-data.json). Puoi esportarli su iCloud Drive o nella cartella File e reimportarli su un altro dispositivo.'
+    : 'Scegli dove salvare user-data.json su macOS (anche dentro iCloud Drive): la posizione scelta rimarrà bloccata come principale ad ogni avvio.';
   const [dataFileInfo, setDataFileInfo] = useState<DataFileInfo | null>(() => {
     try {
       const raw = localStorage.getItem(LINKED_FILE_INFO_STORAGE_KEY);
@@ -2239,6 +2251,7 @@ function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [budgetSortCriteria, setBudgetSortCriteria] = useState<'name' | 'spent' | 'limit' | 'remaining'>('name');
   const [budgetSortOrder, setBudgetSortOrder] = useState<'asc' | 'desc'>('asc');
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadStoredTransactions());
@@ -3189,6 +3202,80 @@ function App() {
     [buildCurrentFullDataPayload, applyFullUserData, refreshDataFileInfo]
   );
 
+  /**
+   * Rilegge subito il file principale (iCloud Drive): serve per prendere
+   * subito le modifiche fatte sull'altra piattaforma, senza aspettare il sync.
+   */
+  const handleReloadPrimaryFile = useCallback(async () => {
+    const bridge = window.budgetApp as any;
+    if (!bridge || typeof bridge.reloadPrimaryFile !== 'function') {
+      setStatusMessage('Ricarica non disponibile su questa piattaforma.');
+      return;
+    }
+
+    try {
+      const res = await bridge.reloadPrimaryFile();
+      if (!res?.success) {
+        setStatusMessage(res?.error || 'Ricarica non riuscita.');
+        return;
+      }
+      if (res.data) {
+        applyFullUserData(res.data, 'file iCloud Drive');
+      }
+      await refreshDataFileInfo();
+      setStatusMessage('Dati ricaricati dal file iCloud Drive.');
+    } catch (err: any) {
+      setStatusMessage(`Errore nella ricarica: ${err?.message || 'errore'}`);
+    }
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  /**
+   * Collega un file user-data.json ESISTENTE (es. su iCloud Drive) come
+   * posizione principale, senza sovrascriverlo.
+   *
+   * È il flusso che permette a Mac e iPhone di usare lo stesso file: le
+   * modifiche vengono sincronizzate da iCloud Drive.
+   */
+  const handleLinkPrimaryFile = useCallback(async () => {
+    const bridge = window.budgetApp as any;
+    if (!bridge || typeof bridge.linkPrimaryFile !== 'function') return;
+
+    try {
+      const res = await bridge.linkPrimaryFile();
+      if (!res) return;
+      if (res.canceled) return;
+      if (!res.success) {
+        setStatusMessage(res.error || 'Collegamento non riuscito.');
+        return;
+      }
+      if (res.data) {
+        applyFullUserData(res.data, res.displayLocation || res.filePath);
+      }
+      await refreshDataFileInfo();
+      setStatusMessage(
+        `Posizione principale collegata: ${res.displayLocation || res.filePath}. Ora i dati si aggiornano anche dall'altra piattaforma.`
+      );
+    } catch (err: any) {
+      setStatusMessage(`Errore nel collegamento del file: ${err?.message || 'errore'}`);
+    }
+  }, [applyFullUserData, refreshDataFileInfo]);
+
+  /** Scollega la cartella principale: i dati tornano sul file locale. */
+  const handleUnlinkPrimaryFile = useCallback(async () => {
+    const bridge = window.budgetApp as any;
+    if (!bridge || typeof bridge.unlinkPrimaryFile !== 'function') return;
+
+    try {
+      const res = await bridge.unlinkPrimaryFile();
+      if (res?.success) {
+        await refreshDataFileInfo();
+        setStatusMessage('Cartella scollegata: i dati vengono salvati solo sul dispositivo.');
+      }
+    } catch (err: any) {
+      setStatusMessage(`Errore nello scollegare la cartella: ${err?.message || 'errore'}`);
+    }
+  }, [refreshDataFileInfo]);
+
   const handleUseICloudDataLocation = useCallback(async () => {
     if (window.budgetApp && typeof window.budgetApp.useICloudDataLocation === 'function') {
       try {
@@ -3319,14 +3406,11 @@ function App() {
     }
 
     const blob = new Blob([serialized], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = targetFileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const saved = await saveGeneratedFile(targetFileName, blob);
+    if (!saved.success) {
+      setStatusMessage(saved.error || saved.message || `Salvataggio di "${targetFileName}" non riuscito.`);
+      return;
+    }
     setStatusMessage(`File "${targetFileName}" salvato con successo (${dataFileInfo?.displayLocation || targetFileName}).`);
   }, [buildCurrentFullDataPayload, dataFileInfo]);
 
@@ -3446,6 +3530,22 @@ function App() {
     };
   }, [applyFullUserData, refreshDataFileInfo]);
 
+  /**
+   * Firma dei dati reali (senza i campi volatili come `exportedAt`).
+   *
+   * Serve a far partire l'autosave **solo quando i dati cambiano davvero**:
+   * il payload completo contiene dei timestamp che cambiano a ogni chiamata,
+   * quindi usando il payload come dipendenza l'effetto si ri-triggerava da
+   * solo (salvataggio → refresh info file → payload nuovo → salvataggio…),
+   * tenendo il file su iCloud Drive sempre "sporco" e impedendo a iCloud di
+   * consegnare le modifiche fatte sull'altra piattaforma.
+   */
+  const dataSignature = useMemo(() => {
+    const payload = buildCurrentFullDataPayload();
+    const { exportedAt: _exportedAt, _fileMeta: _fileMeta, ...stable } = payload;
+    return JSON.stringify(stable);
+  }, [buildCurrentFullDataPayload]);
+
   useEffect(() => {
     if (!isStorageInitialized) return;
 
@@ -3483,33 +3583,7 @@ function App() {
     }, 700);
 
     return () => clearTimeout(timer);
-  }, [
-    isStorageInitialized,
-    buildCurrentFullDataPayload,
-    refreshDataFileInfo,
-    dataFileInfo,
-    transactions,
-    transactionOrder,
-    budgetCategories,
-    assets,
-    storedOpeningCash,
-    openingNetWorth,
-    openingDate,
-    assetTransactions,
-    recurringTransactions,
-    pianiAccumulo,
-    cashbackRules,
-    accountInitialCapitals,
-    subscriptions,
-    theme,
-    accentColor,
-    bgEffect,
-    hideNumbers,
-    customLogo,
-    githubRepo,
-    githubToken,
-    autoCheckUpdates,
-  ]);
+  }, [isStorageInitialized, dataSignature]);
 
   // Automatic posting of recurring transactions and PACs on startup and sync
   const executeAutoPostSync = useCallback((customToday?: string): boolean => {
@@ -4139,7 +4213,7 @@ function App() {
       if (isTransferCategory(cat.name)) return;
       categoryMap.set(cat.name.toUpperCase(), {
         spent: 0,
-        color: cat.color || '#3b82f6',
+        color: cat.color || 'var(--chart-6)',
         subcategories: new Map<string, number>()
       });
     });
@@ -4153,7 +4227,7 @@ function App() {
       if (!categoryMap.has(catKey)) {
         categoryMap.set(catKey, {
           spent: 0,
-          color: '#64748b',
+          color: 'var(--chart-8)',
           subcategories: new Map<string, number>()
         });
       }
@@ -4704,15 +4778,15 @@ function App() {
   const assetAllocationData = useMemo(() => {
     // Macro asset allocation: ETF azionari count as Azioni, ETF obbligazionari count as Obbligazioni
     const categories: Record<string, { value: number; color: string; label: string }> = {
-      cash: { value: Math.max(0, cashAvailable), color: '#06b6d4', label: 'Liquidità (Conti)' },
-      azioni: { value: 0, color: '#3b82f6', label: 'Azioni (incl. ETF Azionari)' },
-      obbligazioni: { value: 0, color: '#10b981', label: 'Obbligazioni (incl. ETF Obbligazionari)' },
-      liquidita: { value: 0, color: '#67e8f9', label: 'Liquidità (Titoli)' },
-      fondo: { value: 0, color: '#ec4899', label: 'Fondi Comuni' },
-      cripto: { value: 0, color: '#f59e0b', label: 'Criptovalute' },
-      proprieta_mobili: { value: 0, color: '#cbd5e1', label: 'Proprietà Mobili' },
-      proprieta_immobili: { value: 0, color: '#ef4444', label: 'Proprietà Immobili' },
-      altro: { value: 0, color: '#64748b', label: 'Altro' },
+      cash: { value: Math.max(0, cashAvailable), color: 'var(--chart-1)', label: 'Liquidità (Conti)' },
+      azioni: { value: 0, color: 'var(--chart-2)', label: 'Azioni (incl. ETF Azionari)' },
+      obbligazioni: { value: 0, color: 'var(--chart-3)', label: 'Obbligazioni (incl. ETF Obbligazionari)' },
+      liquidita: { value: 0, color: 'var(--chart-4)', label: 'Liquidità (Titoli)' },
+      fondo: { value: 0, color: 'var(--chart-5)', label: 'Fondi Comuni' },
+      cripto: { value: 0, color: 'var(--chart-6)', label: 'Criptovalute' },
+      proprieta_mobili: { value: 0, color: 'var(--chart-7)', label: 'Proprietà Mobili' },
+      proprieta_immobili: { value: 0, color: 'var(--chart-8)', label: 'Proprietà Immobili' },
+      altro: { value: 0, color: 'var(--chart-neutral)', label: 'Altro' },
     };
 
     assets.forEach((asset) => {
@@ -4739,7 +4813,7 @@ function App() {
             categories[kind].value += val;
           } else {
             // Custom dynamic categories
-            categories[kind] = { value: val, color: '#84cc16', label: formatAssetKindLabel(kind, asset.etfSubtype) };
+            categories[kind] = { value: val, color: 'var(--chart-7)', label: formatAssetKindLabel(kind, asset.etfSubtype) };
           }
         }
       }
@@ -5374,7 +5448,7 @@ function App() {
       delta: `Mese prec: ${formatSignedEuro(previousMonthNetFlow)}`,
       subValue: (
         <span style={{ fontSize: '0.73rem', color: 'var(--muted)' }}>
-          Differenza: <strong style={{ color: currentMonthSavings - previousMonthNetFlow >= 0 ? '#10b981' : '#f43f5e' }}>{formatSignedEuro(currentMonthSavings - previousMonthNetFlow)}</strong>
+          Differenza: <strong style={{ color: currentMonthSavings - previousMonthNetFlow >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatSignedEuro(currentMonthSavings - previousMonthNetFlow)}</strong>
         </span>
       ),
     },
@@ -6141,6 +6215,45 @@ function App() {
     clearTransactionSelection();
   };
 
+  /**
+   * Crea la transazione a partire dai dati riconosciuti da uno scontrino.
+   * La categoria viene adattata alle categorie gia' presenti nel budget,
+   * cosi' i report aggregano correttamente.
+   */
+  const handleConfirmReceipt = useCallback(
+    (receipt: ReceiptDraft) => {
+      const amount = Math.abs(Number(receipt.amount));
+      if (!Number.isFinite(amount) || amount <= 0) {
+        setStatusMessage('Importo non valido: la transazione non e\' stata creata.');
+        return;
+      }
+
+      const merchant = receipt.merchant.trim() || 'Scontrino';
+      const category = receipt.category.trim() || 'Altro';
+
+      const nextTransaction: Transaction = {
+        id: `txn-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+        date: receipt.date,
+        merchant,
+        category,
+        subcategory: '',
+        account: receipt.account.trim() || 'Conto principale',
+        amount: -amount,
+        kind: 'expense',
+        note: receipt.note.trim(),
+        createdAt: Date.now(),
+        needsReimbursement: false,
+      };
+
+      upsertTransaction(nextTransaction);
+      setActiveSection('transazioni');
+      setStatusMessage(
+        `Transazione da scontrino aggiunta: ${merchant}, ${amount.toFixed(2)} € (${category}).`
+      );
+    },
+    [upsertTransaction]
+  );
+
   const handleSubmitTransaction = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -6460,29 +6573,29 @@ function App() {
           </div>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Quotazione</span>
-            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: '#38bdf8' }}>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: 'var(--info)' }}>
               {tData && typeof tData.price === 'number' ? formatTickerCurrency(tData.price, tData.currency) : formatEuro(asset.unitValue)}
             </strong>
           </div>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Valore Totale</span>
-            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: '#10b981' }}>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: 'var(--success)' }}>
               {tData ? formatTickerCurrency(perf.totalMarketValue, tData.currency) : formatEuro(perf.totalMarketValue)}
             </strong>
           </div>
           <div className="mini-stat-card" style={{ padding: '10px 12px', borderRadius: '12px', backgroundColor: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Rendimento (ROI)</span>
-            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)' }}>
+            <strong style={{ fontSize: '1rem', display: 'block', marginTop: '2px', color: perf.roiPercent > 0 ? 'var(--success)' : perf.roiPercent < 0 ? 'var(--danger)' : 'var(--muted)' }}>
               {perf.roiPercent > 0 ? '+' : ''}{perf.roiPercent.toFixed(2)}%
             </strong>
-            <span style={{ fontSize: '0.68rem', color: perf.pnlEuro > 0 ? '#10b981' : perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)' }}>
+            <span style={{ fontSize: '0.68rem', color: perf.pnlEuro > 0 ? 'var(--success)' : perf.pnlEuro < 0 ? 'var(--danger)' : 'var(--muted)' }}>
               {perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(perf.pnlEuro)}
             </span>
           </div>
         </div>
 
         {showSpecificChart ? (
-          <div className="asset-trend-card" style={{ padding: '1rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.01)' }}>
+          <div className="asset-trend-card" style={{ padding: '1rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'var(--overlay-subtle)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '8px' }}>
               <div>
                 <p className="panel-title" style={{ fontSize: '0.75rem', margin: 0, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.02em' }}>
@@ -6510,8 +6623,8 @@ function App() {
                       padding: '4px 8px',
                       borderRadius: '6px',
                       fontSize: '0.7rem',
-                      backgroundColor: assetChartMode === 'capital' ? '#0d9488' : 'transparent',
-                      color: assetChartMode === 'capital' ? '#fff' : 'var(--muted)',
+                      backgroundColor: assetChartMode === 'capital' ? 'var(--accent)' : 'transparent',
+                      color: assetChartMode === 'capital' ? 'var(--pill-primary-text)' : 'var(--muted)',
                       border: 'none',
                       cursor: 'pointer',
                       fontWeight: 500
@@ -6528,8 +6641,8 @@ function App() {
                       padding: '4px 8px',
                       borderRadius: '6px',
                       fontSize: '0.7rem',
-                      backgroundColor: assetChartMode === 'price' ? '#0d9488' : 'transparent',
-                      color: assetChartMode === 'price' ? '#fff' : 'var(--muted)',
+                      backgroundColor: assetChartMode === 'price' ? 'var(--accent)' : 'transparent',
+                      color: assetChartMode === 'price' ? 'var(--pill-primary-text)' : 'var(--muted)',
                       border: 'none',
                       cursor: 'pointer',
                       fontWeight: 500
@@ -6546,8 +6659,8 @@ function App() {
                       padding: '4px 8px',
                       borderRadius: '6px',
                       fontSize: '0.7rem',
-                      backgroundColor: assetChartMode === 'return' ? '#0d9488' : 'transparent',
-                      color: assetChartMode === 'return' ? '#fff' : 'var(--muted)',
+                      backgroundColor: assetChartMode === 'return' ? 'var(--accent)' : 'transparent',
+                      color: assetChartMode === 'return' ? 'var(--pill-primary-text)' : 'var(--muted)',
                       border: 'none',
                       cursor: 'pointer',
                       fontWeight: 500
@@ -6562,9 +6675,9 @@ function App() {
                     type="checkbox"
                     checked={assetChartMode !== 'capital'}
                     onChange={(e) => setAssetChartMode(e.target.checked ? 'price' : 'capital')}
-                    style={{ cursor: 'pointer', accentColor: '#10b981' }}
+                    style={{ cursor: 'pointer', accentColor: 'var(--success)' }}
                   />
-                  <span style={{ color: assetChartMode !== 'capital' ? '#10b981' : 'var(--muted)', fontWeight: assetChartMode !== 'capital' ? 600 : 400 }}>
+                  <span style={{ color: assetChartMode !== 'capital' ? 'var(--success)' : 'var(--muted)', fontWeight: assetChartMode !== 'capital' ? 600 : 400 }}>
                     Elimina influenza transazioni
                   </span>
                 </label>
@@ -6605,8 +6718,8 @@ function App() {
               >
                 <defs>
                   <linearGradient id="specificAssetTrendStroke" x1="0%" x2="100%" y1="0%" y2="0%">
-                    <stop offset="0%" stopColor="#10b981" />
-                    <stop offset="100%" stopColor="#059669" />
+                    <stop offset="0%" stopColor="var(--success)" />
+                    <stop offset="100%" stopColor="var(--success-strong)" />
                   </linearGradient>
                 </defs>
 
@@ -6618,7 +6731,7 @@ function App() {
                       y1={zeroY}
                       x2={100}
                       y2={zeroY}
-                      stroke="rgba(255, 255, 255, 0.2)"
+                      stroke="var(--chart-grid)"
                       strokeWidth={0.5}
                       strokeDasharray="2,2"
                     />
@@ -6634,7 +6747,7 @@ function App() {
                       return `L ${x.toFixed(2)} ${y.toFixed(2)}`;
                     })
                     .join(' ')} L 100 100 Z`}
-                  fill="rgba(16, 185, 129, 0.05)"
+                  fill="var(--success-soft)"
                 />
                 <path
                   className="line-chart-line"
@@ -6658,7 +6771,7 @@ function App() {
                       y1={0}
                       x2={(hoveredSpecificPointIndex / (trendPoints.length - 1)) * 100}
                       y2={100}
-                      stroke="rgba(16, 185, 129, 0.4)"
+                      stroke="var(--success-border)"
                       strokeWidth={0.4}
                       strokeDasharray="1.5,1.5"
                     />
@@ -6672,8 +6785,8 @@ function App() {
                             cx={x}
                             cy={y}
                             r={1.8}
-                            fill="#10b981"
-                            stroke="#0f172a"
+                            fill="var(--success)"
+                            stroke="var(--bg)"
                             strokeWidth={0.4}
                           />
                           <circle
@@ -6681,7 +6794,7 @@ function App() {
                             cy={y}
                             r={3.5}
                             fill="none"
-                            stroke="#10b981"
+                            stroke="var(--success)"
                             strokeWidth={0.2}
                             opacity={0.6}
                           />
@@ -6700,14 +6813,14 @@ function App() {
                     top: '-50px',
                     left: `${Math.max(12, Math.min(88, (hoveredSpecificPointIndex / (trendPoints.length - 1)) * 100))}%`,
                     transform: 'translateX(-50%)',
-                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    backgroundColor: 'var(--panel-strong)',
+                    border: '1px solid var(--success-border)',
                     borderRadius: '8px',
                     padding: '4px 8px',
-                    color: '#fff',
+                    color: 'var(--text)',
                     pointerEvents: 'none',
                     zIndex: 10,
-                    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
+                    boxShadow: '0 4px 14px var(--scrim)',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -6721,8 +6834,8 @@ function App() {
                   </span>
                   <strong style={{
                     color: assetChartMode === 'return'
-                      ? (trendPoints[hoveredSpecificPointIndex].value >= 0 ? '#10b981' : '#f43f5e')
-                      : '#10b981',
+                      ? (trendPoints[hoveredSpecificPointIndex].value >= 0 ? 'var(--success)' : 'var(--danger)')
+                      : 'var(--success)',
                     fontSize: '0.8rem',
                     fontFamily: 'var(--font-mono)'
                   }}>
@@ -6743,8 +6856,8 @@ function App() {
                   <strong style={{
                     fontSize: '0.75rem',
                     color: assetChartMode === 'return'
-                      ? (point.value >= 0 ? '#10b981' : '#f43f5e')
-                      : '#cbd5e1',
+                      ? (point.value >= 0 ? 'var(--success)' : 'var(--danger)')
+                      : 'var(--muted)',
                     fontFamily: 'var(--font-mono)'
                   }}>
                     {formatAssetPointVal(point.value)}
@@ -6754,15 +6867,15 @@ function App() {
             </div>
           </div>
         ) : (
-          <div style={{ padding: '12px', border: '1px dashed var(--border)', borderRadius: '12px', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.01)', color: 'var(--muted)' }}>
+          <div style={{ padding: '12px', border: '1px dashed var(--border)', borderRadius: '12px', textAlign: 'center', backgroundColor: 'var(--overlay-subtle)', color: 'var(--muted)' }}>
             <p style={{ fontSize: '0.75rem', margin: 0, fontWeight: 500 }}>Nessun andamento storico disponibile.</p>
             <p style={{ fontSize: '0.68rem', margin: '2px 0 0 0', opacity: 0.75 }}>Registra transazioni o inserisci un ticker valido per tracciare le quotazioni storiche.</p>
           </div>
         )}
 
-        <div style={{ padding: '0.75rem 1rem', border: editingAssetTxId ? '1px solid #38bdf8' : '1px solid var(--border)', borderRadius: '12px', backgroundColor: editingAssetTxId ? 'rgba(56, 189, 248, 0.03)' : 'rgba(255,255,255,0.01)' }}>
+        <div style={{ padding: '0.75rem 1rem', border: editingAssetTxId ? '1px solid var(--info)' : '1px solid var(--border)', borderRadius: '12px', backgroundColor: editingAssetTxId ? 'var(--info-soft)' : 'var(--overlay-subtle)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <h3 style={{ fontSize: '0.85rem', margin: 0, fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.03em', color: editingAssetTxId ? '#38bdf8' : '#cbd5e1' }}>
+            <h3 style={{ fontSize: '0.85rem', margin: 0, fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.03em', color: editingAssetTxId ? 'var(--info)' : 'var(--muted)' }}>
               {editingAssetTxId ? '✏️ Modifica Operazione Asset' : 'Registra Operazione'}
             </h3>
             {editingAssetTxId && (
@@ -6813,8 +6926,8 @@ function App() {
                   padding: '6px 12px',
                   fontSize: '0.8rem',
                   borderRadius: '8px',
-                  background: editingAssetTxId ? '#38bdf8' : undefined,
-                  color: editingAssetTxId ? '#07111f' : undefined,
+                  background: editingAssetTxId ? 'var(--info)' : undefined,
+                  color: editingAssetTxId ? 'var(--pill-primary-text)' : undefined,
                   fontWeight: editingAssetTxId ? 600 : undefined
                 }}
               >
@@ -6835,7 +6948,7 @@ function App() {
         </div>
 
         <div>
-          <h3 style={{ fontSize: '0.85rem', marginBottom: '0.4rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.03em', color: '#cbd5e1' }}>Registro Operazioni</h3>
+          <h3 style={{ fontSize: '0.85rem', marginBottom: '0.4rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.03em', color: 'var(--muted)' }}>Registro Operazioni</h3>
           {txs.length === 0 ? (
             <p style={{ fontSize: '0.75rem', color: 'var(--muted)', fontStyle: 'italic', margin: 0 }}>Nessuna operazione registrata.</p>
           ) : (
@@ -6851,21 +6964,21 @@ function App() {
                       justifyContent: 'space-between',
                       alignItems: 'center',
                       padding: '6px 8px',
-                      border: isBeingEdited ? '1px solid #38bdf8' : '1px solid var(--border)',
+                      border: isBeingEdited ? '1px solid var(--info)' : '1px solid var(--border)',
                       borderRadius: '8px',
                       fontSize: '0.75rem',
-                      backgroundColor: isBeingEdited ? 'rgba(56, 189, 248, 0.08)' : 'rgba(255,255,255,0.01)',
+                      backgroundColor: isBeingEdited ? 'var(--info-soft)' : 'var(--overlay-subtle)',
                       transition: 'all 0.15s ease'
                     }}
                   >
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ color: tx.kind === 'buy' ? '#10b981' : '#f43f5e', fontWeight: 700, fontSize: '0.7rem' }}>
+                        <span style={{ color: tx.kind === 'buy' ? 'var(--success)' : 'var(--danger)', fontWeight: 700, fontSize: '0.7rem' }}>
                           {tx.kind === 'buy' ? 'BUY' : 'SELL'}
                         </span>
                         <span style={{ color: 'var(--muted)', fontSize: '0.7rem' }}>{formatDisplayDate(tx.date)}</span>
                         {isBeingEdited && (
-                          <span style={{ fontSize: '0.625rem', backgroundColor: '#38bdf8', color: '#07111f', padding: '1px 5px', borderRadius: '4px', fontWeight: 700, letterSpacing: '0.02em' }}>
+                          <span style={{ fontSize: '0.625rem', backgroundColor: 'var(--info)', color: 'var(--pill-primary-text)', padding: '1px 5px', borderRadius: '4px', fontWeight: 700, letterSpacing: '0.02em' }}>
                             IN MODIFICA
                           </span>
                         )}
@@ -6888,7 +7001,7 @@ function App() {
                               handleStartEditAssetTransaction(tx);
                             }
                           }}
-                          style={{ color: isBeingEdited ? '#f59e0b' : '#38bdf8', fontSize: '0.7rem', padding: 0, fontWeight: 500 }}
+                          style={{ color: isBeingEdited ? 'var(--warning)' : 'var(--info)', fontSize: '0.7rem', padding: 0, fontWeight: 500 }}
                         >
                           {isBeingEdited ? 'Annulla' : 'Modifica'}
                         </button>
@@ -6896,7 +7009,7 @@ function App() {
                           className="text-button"
                           type="button"
                           onClick={() => handleDeleteAssetTransaction(tx.id)}
-                          style={{ color: '#f43f5e', fontSize: '0.7rem', padding: 0 }}
+                          style={{ color: 'var(--danger)', fontSize: '0.7rem', padding: 0 }}
                         >
                           Elimina
                         </button>
@@ -6936,9 +7049,9 @@ function App() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '4px',
-                    backgroundColor: isFetchingTickers ? 'rgba(255,255,255,0.02)' : 'rgba(56, 189, 248, 0.08)',
-                    borderColor: 'rgba(56, 189, 248, 0.2)',
-                    color: '#38bdf8',
+                    backgroundColor: isFetchingTickers ? 'var(--overlay-subtle)' : 'var(--info-soft)',
+                    borderColor: 'var(--info-border)',
+                    color: 'var(--info)',
                     padding: '4px 10px',
                     borderRadius: '999px',
                     fontSize: '0.75rem',
@@ -6948,7 +7061,7 @@ function App() {
                   {isFetchingTickers ? 'Aggiornamento...' : '🔄 Aggiorna Quotazioni'}
                 </button>
               )}
-              <span className="pill pill-soft" style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '999px', backgroundColor: 'rgba(16, 185, 129, 0.08)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+              <span className="pill pill-soft" style={{ fontSize: '0.75rem', padding: '4px 10px', borderRadius: '999px', backgroundColor: 'var(--success-soft)', color: 'var(--success)', border: '1px solid var(--success-border)' }}>
                 Totale: {formatEuro(assetMarketValue)}
               </span>
               <button className="primary-button" type="button" onClick={startNewAsset} style={{ padding: '5px 10px', fontSize: '0.75rem', borderRadius: '8px' }}>
@@ -6958,7 +7071,7 @@ function App() {
           </div>
 
           {showPortfolioChart ? (
-            <div className="asset-trend-card" style={{ padding: '1rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.01)' }}>
+            <div className="asset-trend-card" style={{ padding: '1rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'var(--overlay-subtle)' }}>
               <div className="asset-trend-copy" style={{ paddingBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
                 <div style={{ flex: '1 1 240px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -6969,9 +7082,9 @@ function App() {
                       fontSize: '0.65rem',
                       padding: '2px 7px',
                       borderRadius: '4px',
-                      backgroundColor: portfolioChartMode === 'total' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-                      color: portfolioChartMode === 'total' ? '#38bdf8' : '#10b981',
-                      border: `1px solid ${portfolioChartMode === 'total' ? 'rgba(56, 189, 248, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                      backgroundColor: portfolioChartMode === 'total' ? 'var(--info-soft)' : 'var(--success-soft)',
+                      color: portfolioChartMode === 'total' ? 'var(--info)' : 'var(--success)',
+                      border: `1px solid ${portfolioChartMode === 'total' ? 'var(--info-border)' : 'var(--success-border)'}`,
                       fontWeight: 600
                     }}>
                       {portfolioChartMode === 'total' ? 'Transazioni + Quotazioni' : 'Solo Quotazioni (Time-Weighted)'}
@@ -6998,8 +7111,8 @@ function App() {
                           padding: '4px 9px',
                           borderRadius: '6px',
                           fontSize: '0.72rem',
-                          backgroundColor: portfolioChartMode === 'total' ? '#0284c7' : 'transparent',
-                          color: portfolioChartMode === 'total' ? '#fff' : 'var(--muted)',
+                          backgroundColor: portfolioChartMode === 'total' ? 'var(--info)' : 'transparent',
+                          color: portfolioChartMode === 'total' ? 'var(--on-solid)' : 'var(--muted)',
                           border: 'none',
                           cursor: 'pointer',
                           fontWeight: 500,
@@ -7019,8 +7132,8 @@ function App() {
                           padding: '4px 9px',
                           borderRadius: '6px',
                           fontSize: '0.72rem',
-                          backgroundColor: portfolioChartMode === 'no-transactions' ? '#059669' : 'transparent',
-                          color: portfolioChartMode === 'no-transactions' ? '#fff' : 'var(--muted)',
+                          backgroundColor: portfolioChartMode === 'no-transactions' ? 'var(--success-strong)' : 'transparent',
+                          color: portfolioChartMode === 'no-transactions' ? 'var(--on-solid)' : 'var(--muted)',
                           border: 'none',
                           cursor: 'pointer',
                           fontWeight: 500,
@@ -7039,9 +7152,9 @@ function App() {
                         type="checkbox"
                         checked={portfolioChartMode === 'no-transactions'}
                         onChange={(e) => setPortfolioChartMode(e.target.checked ? 'no-transactions' : 'total')}
-                        style={{ cursor: 'pointer', accentColor: '#10b981' }}
+                        style={{ cursor: 'pointer', accentColor: 'var(--success)' }}
                       />
-                      <span style={{ color: portfolioChartMode === 'no-transactions' ? '#10b981' : 'var(--muted)', fontWeight: portfolioChartMode === 'no-transactions' ? 600 : 400 }}>
+                      <span style={{ color: portfolioChartMode === 'no-transactions' ? 'var(--success)' : 'var(--muted)', fontWeight: portfolioChartMode === 'no-transactions' ? 600 : 400 }}>
                         Elimina influenza transazioni
                       </span>
                     </label>
@@ -7128,9 +7241,9 @@ function App() {
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px',
-                              backgroundColor: isSelected ? 'rgba(56, 189, 248, 0.12)' : 'rgba(255, 255, 255, 0.01)',
-                              color: isSelected ? '#38bdf8' : 'var(--muted)',
-                              borderColor: isSelected ? 'rgba(56, 189, 248, 0.25)' : 'var(--border)',
+                              backgroundColor: isSelected ? 'var(--info-soft)' : 'var(--overlay-subtle)',
+                              color: isSelected ? 'var(--info)' : 'var(--muted)',
+                              borderColor: isSelected ? 'var(--info-border)' : 'var(--border)',
                               transition: 'all 0.15s ease',
                             }}
                           >
@@ -7138,7 +7251,7 @@ function App() {
                               width: '5px',
                               height: '5px',
                               borderRadius: '50%',
-                              backgroundColor: isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.15)'
+                              backgroundColor: isSelected ? 'var(--info)' : 'var(--overlay-strong)'
                             }} />
                             {asset.name}
                           </button>
@@ -7182,12 +7295,12 @@ function App() {
                 >
                   <defs>
                     <linearGradient id="assetTrendStrokeTotal" x1="0%" x2="100%" y1="0%" y2="0%">
-                      <stop offset="0%" stopColor="#5eead4" />
-                      <stop offset="100%" stopColor="#38bdf8" />
+                      <stop offset="0%" stopColor="var(--accent)" />
+                      <stop offset="100%" stopColor="var(--info)" />
                     </linearGradient>
                     <linearGradient id="assetTrendStrokeNoTx" x1="0%" x2="100%" y1="0%" y2="0%">
-                      <stop offset="0%" stopColor="#34d399" />
-                      <stop offset="100%" stopColor="#059669" />
+                      <stop offset="0%" stopColor="var(--success)" />
+                      <stop offset="100%" stopColor="var(--success-strong)" />
                     </linearGradient>
                   </defs>
 
@@ -7199,7 +7312,7 @@ function App() {
                         y1={zeroY}
                         x2={100}
                         y2={zeroY}
-                        stroke="rgba(255, 255, 255, 0.2)"
+                        stroke="var(--chart-grid)"
                         strokeWidth={0.5}
                         strokeDasharray="2,2"
                       />
@@ -7215,7 +7328,7 @@ function App() {
                         return `L ${x.toFixed(2)} ${y.toFixed(2)}`;
                       })
                       .join(' ')} L 100 100 Z`}
-                    fill={portfolioChartMode === 'total' ? 'rgba(56, 189, 248, 0.04)' : 'rgba(16, 185, 129, 0.05)'}
+                    fill={portfolioChartMode === 'total' ? 'var(--info-soft)' : 'var(--success-soft)'}
                   />
                   <path
                     className="line-chart-line"
@@ -7239,7 +7352,7 @@ function App() {
                         y1={0}
                         x2={(hoveredPointIndex / (assetPortfolioTrend.length - 1)) * 100}
                         y2={100}
-                        stroke={portfolioChartMode === 'total' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(16, 185, 129, 0.4)'}
+                        stroke={portfolioChartMode === 'total' ? 'var(--info-border)' : 'var(--success-border)'}
                         strokeWidth={0.4}
                         strokeDasharray="1.5,1.5"
                       />
@@ -7247,7 +7360,7 @@ function App() {
                         const point = assetPortfolioTrend[hoveredPointIndex];
                         const x = assetPortfolioTrend.length > 1 ? (hoveredPointIndex / (assetPortfolioTrend.length - 1)) * 100 : 100;
                         const y = 100 - ((point.value - assetTrendMin) / (assetTrendMax - assetTrendMin || 1)) * 76 - 8;
-                        const guideColor = portfolioChartMode === 'total' ? '#38bdf8' : '#10b981';
+                        const guideColor = portfolioChartMode === 'total' ? 'var(--info)' : 'var(--success)';
                         return (
                           <>
                             <circle
@@ -7255,7 +7368,7 @@ function App() {
                               cy={y}
                               r={1.8}
                               fill={guideColor}
-                              stroke="#0f172a"
+                              stroke="var(--bg)"
                               strokeWidth={0.4}
                             />
                             <circle
@@ -7282,14 +7395,14 @@ function App() {
                       top: '-50px',
                       left: `${Math.max(12, Math.min(88, (hoveredPointIndex / (assetPortfolioTrend.length - 1)) * 100))}%`,
                       transform: 'translateX(-50%)',
-                      backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                      border: `1px solid ${portfolioChartMode === 'total' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+                      backgroundColor: 'var(--panel-strong)',
+                      border: `1px solid ${portfolioChartMode === 'total' ? 'var(--info-border)' : 'var(--success-border)'}`,
                       borderRadius: '8px',
                       padding: '4px 8px',
-                      color: '#fff',
+                      color: 'var(--text)',
                       pointerEvents: 'none',
                       zIndex: 10,
-                      boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
+                      boxShadow: '0 4px 14px var(--scrim)',
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
@@ -7303,8 +7416,8 @@ function App() {
                     </span>
                     <strong style={{
                       color: portfolioChartMode === 'no-transactions'
-                        ? (assetPortfolioTrend[hoveredPointIndex].value >= 0 ? '#10b981' : '#f43f5e')
-                        : '#38bdf8',
+                        ? (assetPortfolioTrend[hoveredPointIndex].value >= 0 ? 'var(--success)' : 'var(--danger)')
+                        : 'var(--info)',
                       fontSize: '0.8rem',
                       fontFamily: 'var(--font-mono)'
                     }}>
@@ -7328,8 +7441,8 @@ function App() {
                     <strong style={{
                       fontSize: '0.75rem',
                       color: portfolioChartMode === 'no-transactions'
-                        ? (point.value >= 0 ? '#10b981' : '#f43f5e')
-                        : '#cbd5e1',
+                        ? (point.value >= 0 ? 'var(--success)' : 'var(--danger)')
+                        : 'var(--muted)',
                       fontFamily: 'var(--font-mono)'
                     }}>
                       {portfolioChartMode === 'no-transactions'
@@ -7341,7 +7454,7 @@ function App() {
               </div>
             </div>
           ) : (
-            <div style={{ padding: '16px', border: '1px dashed var(--border)', borderRadius: '16px', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.01)', color: 'var(--muted)', margin: '0.25rem 0' }}>
+            <div style={{ padding: '16px', border: '1px dashed var(--border)', borderRadius: '16px', textAlign: 'center', backgroundColor: 'var(--overlay-subtle)', color: 'var(--muted)', margin: '0.25rem 0' }}>
               <p style={{ fontSize: '0.8rem', margin: 0, fontWeight: 500 }}>Nessun grafico di portafoglio disponibile.</p>
               <p style={{ fontSize: '0.7rem', margin: '4px 0 0 0', opacity: 0.75 }}>Fornisci degli strumenti con transazioni storiche per tracciare la crescita cumulativa.</p>
             </div>
@@ -7350,23 +7463,23 @@ function App() {
           <div className="asset-summary-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
             <article className="mini-stat-card" style={{ padding: '12px', borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--overlay-subtle)' }}>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Valore di Mercato</span>
-              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: '#10b981' }}>{formatEuro(assetMarketValue)}</strong>
+              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: 'var(--success)' }}>{formatEuro(assetMarketValue)}</strong>
               <p style={{ fontSize: '0.68rem', color: 'var(--muted)', margin: '4px 0 0 0', lineHeight: 1.25 }}>Valore attuale dei titoli.</p>
             </article>
             <article className="mini-stat-card" style={{ padding: '12px', borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--overlay-subtle)' }}>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Strumenti</span>
-              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: '#cbd5e1' }}>{assets.length}</strong>
+              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: 'var(--muted)' }}>{assets.length}</strong>
               <p style={{ fontSize: '0.68rem', color: 'var(--muted)', margin: '4px 0 0 0', lineHeight: 1.25 }}>Quantità di asset unici.</p>
             </article>
             <article className="mini-stat-card" style={{ padding: '12px', borderRadius: '12px', border: '1px solid var(--border)', backgroundColor: 'var(--overlay-subtle)' }}>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.02em' }}>Patrimonio Totale</span>
-              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: '#38bdf8' }}>{formatEuro(currentNetWorth)}</strong>
+              <strong style={{ fontSize: '1.05rem', display: 'block', marginTop: '2px', color: 'var(--info)' }}>{formatEuro(currentNetWorth)}</strong>
               <p style={{ fontSize: '0.68rem', color: 'var(--muted)', margin: '4px 0 0 0', lineHeight: 1.25 }}>Saldo conti + titoli.</p>
             </article>
           </div>
 
           {/* Asset Allocation Chart Card */}
-          <div className="asset-allocation-card" style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.01)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="asset-allocation-card" style={{ padding: '1.25rem', border: '1px solid var(--border)', borderRadius: '16px', backgroundColor: 'var(--overlay-subtle)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <p className="panel-title" style={{ fontSize: '0.75rem', margin: 0, textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.02em' }}>Ripartizione Patrimoniale</p>
               <h3 style={{ fontSize: '0.95rem', margin: '2px 0 0 0', fontWeight: 600 }}>Allocazione di Asset &amp; Liquidità</h3>
@@ -7472,7 +7585,7 @@ function App() {
                           gap: '10px',
                           padding: '8px 10px',
                           borderRadius: '10px',
-                          backgroundColor: isHovered ? 'rgba(255,255,255,0.03)' : 'transparent',
+                          backgroundColor: isHovered ? 'var(--overlay-subtle)' : 'transparent',
                           border: isHovered ? '1px solid var(--border)' : '1px solid transparent',
                           transition: 'all 0.15s ease',
                           cursor: 'pointer'
@@ -7499,7 +7612,7 @@ function App() {
                           transition: 'all 0.15s ease'
                         }} />
                         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                          <span style={{ fontSize: '0.75rem', color: isHovered ? 'var(--text)' : '#94a3b8', fontWeight: isHovered ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: '0.75rem', color: isHovered ? 'var(--text)' : 'var(--muted)', fontWeight: isHovered ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {item.label}
                           </span>
                           <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontFamily: 'var(--font-mono)', marginTop: '1px' }}>
@@ -7667,7 +7780,7 @@ function App() {
                   fontSize: '0.74rem',
                   fontWeight: 600,
                   backgroundColor: assetViewMode === 'table' ? 'var(--accent)' : 'transparent',
-                  color: assetViewMode === 'table' ? '#ffffff' : 'var(--muted)',
+                  color: assetViewMode === 'table' ? 'var(--pill-primary-text)' : 'var(--muted)',
                   border: 'none',
                   cursor: 'pointer',
                   display: 'flex',
@@ -7686,7 +7799,7 @@ function App() {
                   fontSize: '0.74rem',
                   fontWeight: 600,
                   backgroundColor: assetViewMode === 'cards' ? 'var(--accent)' : 'transparent',
-                  color: assetViewMode === 'cards' ? '#ffffff' : 'var(--muted)',
+                  color: assetViewMode === 'cards' ? 'var(--pill-primary-text)' : 'var(--muted)',
                   border: 'none',
                   cursor: 'pointer',
                   display: 'flex',
@@ -7717,7 +7830,7 @@ function App() {
                       </th>
                       <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }}>Quotazione</th>
                       <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--muted)' }}>Valore Attuale</th>
-                      <th style={{ padding: '10px 14px', fontSize: '0.78rem', textAlign: 'right', color: '#38bdf8' }} title="Rendimento percentuale calcolato tra Prezzo Medio di Carico e Quotazione attuale">
+                      <th style={{ padding: '10px 14px', fontSize: '0.78rem', textAlign: 'right', color: 'var(--info)' }} title="Rendimento percentuale calcolato tra Prezzo Medio di Carico e Quotazione attuale">
                         Rendimento % (ROI)
                       </th>
                       <th style={{ padding: '10px 12px', fontSize: '0.78rem', textAlign: 'center', color: 'var(--muted)' }}>Azioni</th>
@@ -7743,7 +7856,7 @@ function App() {
                           }}
                           style={{
                             borderBottom: '1px solid var(--border)',
-                            backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                            backgroundColor: isSelected ? 'var(--success-soft)' : 'transparent',
                             cursor: 'pointer',
                             transition: 'background-color 0.15s ease',
                           }}
@@ -7759,9 +7872,9 @@ function App() {
                                       fontWeight: 700,
                                       padding: '1px 5px',
                                       borderRadius: '4px',
-                                      backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                                      color: '#38bdf8',
-                                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                                      backgroundColor: 'var(--info-soft)',
+                                      color: 'var(--info)',
+                                      border: '1px solid var(--info-border)',
                                       fontFamily: 'var(--font-mono)',
                                     }}
                                   >
@@ -7779,14 +7892,14 @@ function App() {
                                 padding: '2px 8px',
                                 borderRadius: '6px',
                                 background: isAssetBondEtf(asset)
-                                  ? 'rgba(16, 185, 129, 0.12)'
+                                  ? 'var(--success-soft)'
                                   : isAssetEquityEtf(asset)
-                                  ? 'rgba(59, 130, 246, 0.12)'
+                                  ? 'var(--accent-soft)'
                                   : 'var(--overlay-medium)',
                                 color: isAssetBondEtf(asset)
-                                  ? '#10b981'
+                                  ? 'var(--success)'
                                   : isAssetEquityEtf(asset)
-                                  ? '#3b82f6'
+                                  ? 'var(--chart-6)'
                                   : 'var(--text)',
                                 fontWeight: 600,
                               }}
@@ -7812,12 +7925,12 @@ function App() {
                                 : formatEuro(asset.unitValue)}
                             </div>
                             {tData && (
-                              <div style={{ fontSize: '0.68rem', color: tData.price >= tData.previousClose ? '#10b981' : '#f43f5e' }}>
+                              <div style={{ fontSize: '0.68rem', color: tData.price >= tData.previousClose ? 'var(--success)' : 'var(--danger)' }}>
                                 ● {tData.price >= tData.previousClose ? '+' : ''}{((tData.price - tData.previousClose) / (tData.previousClose || 1) * 100).toFixed(2)}%
                               </div>
                             )}
                           </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700, color: '#10b981' }}>
+                          <td style={{ padding: '12px', textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>
                             {tData ? formatTickerCurrency(perf.totalMarketValue, tData.currency) : formatEuro(perf.totalMarketValue)}
                           </td>
                           <td style={{ padding: '12px 14px', textAlign: 'right' }}>
@@ -7826,7 +7939,7 @@ function App() {
                                 style={{
                                   fontWeight: 700,
                                   fontSize: '0.9rem',
-                                  color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)',
+                                  color: perf.roiPercent > 0 ? 'var(--success)' : perf.roiPercent < 0 ? 'var(--danger)' : 'var(--muted)',
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: '2px',
@@ -7838,7 +7951,7 @@ function App() {
                               <span
                                 style={{
                                   fontSize: '0.72rem',
-                                  color: perf.pnlEuro > 0 ? '#10b981' : perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)',
+                                  color: perf.pnlEuro > 0 ? 'var(--success)' : perf.pnlEuro < 0 ? 'var(--danger)' : 'var(--muted)',
                                   opacity: 0.85,
                                   fontFamily: 'var(--font-mono)',
                                 }}
@@ -7858,7 +7971,7 @@ function App() {
                                   }
                                   setSelectedAssetIdForDetails(asset.id);
                                 }}
-                                style={{ fontSize: '0.72rem', color: '#38bdf8', padding: '2px 4px' }}
+                                style={{ fontSize: '0.72rem', color: 'var(--info)', padding: '2px 4px' }}
                                 title="Visualizza transazioni e grafico specifico"
                               >
                                 Dettagli
@@ -7867,7 +7980,7 @@ function App() {
                                 className="text-button"
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); openEditAsset(asset); }}
-                                style={{ fontSize: '0.72rem', color: '#94a3b8', padding: '2px 4px' }}
+                                style={{ fontSize: '0.72rem', color: 'var(--muted)', padding: '2px 4px' }}
                               >
                                 Modifica
                               </button>
@@ -7875,7 +7988,7 @@ function App() {
                                 className="text-button"
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); handleDeleteAssetDirect(asset.id); }}
-                                style={{ fontSize: '0.72rem', color: '#fb7185', padding: '2px 4px' }}
+                                style={{ fontSize: '0.72rem', color: 'var(--danger)', padding: '2px 4px' }}
                               >
                                 Elimina
                               </button>
@@ -7912,16 +8025,16 @@ function App() {
                               <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 400 }}>Capitale Investito</span>
                             </td>
                             <td style={{ padding: '12px' }}></td>
-                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '0.9rem', color: '#10b981' }}>
+                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '0.9rem', color: 'var(--success)' }}>
                               <div>{formatEuro(totalMkt)}</div>
                               <span style={{ fontSize: '0.68rem', color: 'var(--muted)', fontWeight: 400 }}>Controvalore Attuale</span>
                             </td>
                             <td style={{ padding: '12px 14px', textAlign: 'right' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                                <span style={{ fontSize: '0.95rem', color: totalRoi >= 0 ? '#10b981' : '#f43f5e' }}>
+                                <span style={{ fontSize: '0.95rem', color: totalRoi >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                                   {totalRoi > 0 ? '▲ +' : totalRoi < 0 ? '▼ ' : ''}{totalRoi.toFixed(2)}%
                                 </span>
-                                <span style={{ fontSize: '0.72rem', color: totalPnl >= 0 ? '#10b981' : '#f43f5e' }}>
+                                <span style={{ fontSize: '0.72rem', color: totalPnl >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                                   {totalPnl >= 0 ? '+' : ''}{formatEuro(totalPnl)}
                                 </span>
                               </div>
@@ -7957,10 +8070,10 @@ function App() {
                       padding: '16px 18px',
                       borderRadius: '16px',
                       border: '1px solid var(--border)',
-                      backgroundColor: selectedAssetIdForDetails === asset.id ? 'rgba(16, 185, 129, 0.05)' : 'rgba(255,255,255,0.02)',
-                      borderLeft: selectedAssetIdForDetails === asset.id ? '4px solid #10b981' : '1px solid var(--border)',
+                      backgroundColor: selectedAssetIdForDetails === asset.id ? 'var(--success-soft)' : 'var(--overlay-subtle)',
+                      borderLeft: selectedAssetIdForDetails === asset.id ? '4px solid var(--success)' : '1px solid var(--border)',
                       transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                      boxShadow: selectedAssetIdForDetails === asset.id ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
+                      boxShadow: selectedAssetIdForDetails === asset.id ? '0 4px 12px var(--shadow-sm)' : 'none',
                       cursor: 'pointer'
                     }}
                   >
@@ -7974,9 +8087,9 @@ function App() {
                               fontWeight: 700,
                               padding: '2px 6px',
                               borderRadius: '4px',
-                              backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                              color: '#38bdf8',
-                              border: '1px solid rgba(56, 189, 248, 0.2)',
+                              backgroundColor: 'var(--info-soft)',
+                              color: 'var(--info)',
+                              border: '1px solid var(--info-border)',
                               letterSpacing: '0.03em',
                               fontFamily: 'var(--font-mono)'
                             }}>
@@ -7993,9 +8106,9 @@ function App() {
                                 padding: '2px 8px',
                                 borderRadius: '6px',
                                 fontWeight: 650,
-                                background: isAssetBondEtf(asset) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(59, 130, 246, 0.12)',
-                                color: isAssetBondEtf(asset) ? '#10b981' : '#3b82f6',
-                                border: `1px solid ${isAssetBondEtf(asset) ? 'rgba(16, 185, 129, 0.25)' : 'rgba(59, 130, 246, 0.25)'}`,
+                                background: isAssetBondEtf(asset) ? 'var(--success-soft)' : 'var(--accent-soft)',
+                                color: isAssetBondEtf(asset) ? 'var(--success)' : 'var(--chart-6)',
+                                border: `1px solid ${isAssetBondEtf(asset) ? 'var(--success-border)' : 'var(--chart-6)'}`,
                               }}
                             >
                               {isAssetBondEtf(asset) ? '🏛️ ETF Obbligazionario (conta in Obbligazioni)' : '📈 ETF Azionario (conta in Azioni)'}
@@ -8004,7 +8117,7 @@ function App() {
                         </p>
                       </div>
                       <div className="asset-card-meta" style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                        <strong style={{ fontSize: '1.2rem', color: '#10b981', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                        <strong style={{ fontSize: '1.2rem', color: 'var(--success)', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
                           {tData ? formatTickerCurrency(totalValue, tData.currency) : formatEuro(totalValue)}
                         </strong>
                         <div style={{ display: 'flex', gap: '8px', marginTop: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
@@ -8017,11 +8130,11 @@ function App() {
                               }
                               setSelectedAssetIdForDetails(asset.id);
                             }}
-                            style={{ fontSize: '0.725rem', padding: 0, color: '#38bdf8', fontWeight: 500 }}
+                            style={{ fontSize: '0.725rem', padding: 0, color: 'var(--info)', fontWeight: 500 }}
                           >
                             Dettagli & Transazioni
                           </button>
-                          <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); openEditAsset(asset); }} style={{ fontSize: '0.725rem', padding: 0, color: '#94a3b8', fontWeight: 500 }}>
+                          <button className="text-button" type="button" onClick={(e) => { e.stopPropagation(); openEditAsset(asset); }} style={{ fontSize: '0.725rem', padding: 0, color: 'var(--muted)', fontWeight: 500 }}>
                             Modifica
                           </button>
                           <button
@@ -8031,7 +8144,7 @@ function App() {
                             style={{
                               fontSize: '0.725rem',
                               padding: 0,
-                              color: '#fb7185',
+                              color: 'var(--danger)',
                               fontWeight: 600,
                               textDecoration: 'none',
                               cursor: 'pointer',
@@ -8042,16 +8155,16 @@ function App() {
                         </div>
                       </div>
                     </div>
-                    <div className="asset-details" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '0.78rem', color: 'var(--muted)', marginTop: '10px', borderTop: '1px solid rgba(255,255,255,0.03)', paddingTop: '8px', alignItems: 'center' }}>
+                    <div className="asset-details" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', fontSize: '0.78rem', color: 'var(--muted)', marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '8px', alignItems: 'center' }}>
                       <span>Qta: <strong style={{ color: 'var(--text)' }}>{currentQty}</strong></span>
                       <span>PMC: <strong style={{ color: 'var(--text)' }}>{formatEuro(perf.pmc)}</strong></span>
                       <span>Quotazione: <strong style={{ color: 'var(--text)' }}>{tData && typeof tData.price === 'number' ? formatTickerCurrency(tData.price, tData.currency) : formatEuro(asset.unitValue)}</strong></span>
-                      <span style={{ color: perf.roiPercent > 0 ? '#10b981' : perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ color: perf.roiPercent > 0 ? 'var(--success)' : perf.roiPercent < 0 ? 'var(--danger)' : 'var(--muted)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                         ROI: {perf.roiPercent > 0 ? '▲ +' : perf.roiPercent < 0 ? '▼ ' : ''}{perf.roiPercent.toFixed(2)}%
                         <span style={{ fontSize: '0.72rem', opacity: 0.85, fontWeight: 500 }}>({perf.pnlEuro >= 0 ? '+' : ''}{formatEuro(perf.pnlEuro)})</span>
                       </span>
                       {tData ? (
-                        <span style={{ color: tData.price >= tData.previousClose ? '#10b981' : '#f43f5e', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+                        <span style={{ color: tData.price >= tData.previousClose ? 'var(--success)' : 'var(--danger)', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
                           <span style={{ fontSize: '0.55rem' }}>●</span> Oggi: <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--text)' }}>{formatTickerCurrency(tData.price, tData.currency)}</strong>
                           <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>
                             ({tData.price >= tData.previousClose ? '+' : ''}{((tData.price - tData.previousClose) / (tData.previousClose || 1) * 100).toFixed(2)}%)
@@ -8060,7 +8173,7 @@ function App() {
                       ) : null}
                     </div>
                     {asset.note ? (
-                      <p className="asset-note" style={{ margin: '8px 0 0 0', fontSize: '0.725rem', color: 'var(--muted)', fontStyle: 'italic', backgroundColor: 'rgba(255,255,255,0.015)', padding: '6px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <p className="asset-note" style={{ margin: '8px 0 0 0', fontSize: '0.725rem', color: 'var(--muted)', fontStyle: 'italic', backgroundColor: 'var(--overlay-subtle)', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)' }}>
                         {asset.note}
                       </p>
                     ) : null}
@@ -8078,7 +8191,7 @@ function App() {
                 <p className="section-label" style={{ margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem', color: 'var(--muted)' }}>Editor Asset</p>
                 <h2 style={{ fontSize: '1.35rem', fontWeight: 700, margin: '4px 0 0 0' }}>{editingAssetId ? 'Aggiorna Asset' : 'Aggiungi Titolo'}</h2>
               </div>
-              {editingAssetId ? <span className="pill pill-soft" style={{ fontSize: '0.7rem', padding: '3px 8px', backgroundColor: 'rgba(234, 179, 8, 0.08)', color: '#eab308', border: '1px solid rgba(234, 179, 8, 0.15)' }}>Modifica attiva</span> : null}
+              {editingAssetId ? <span className="pill pill-soft" style={{ fontSize: '0.7rem', padding: '3px 8px', backgroundColor: 'var(--warning-soft)', color: 'var(--warning)', border: '1px solid var(--warning-border)' }}>Modifica attiva</span> : null}
             </div>
             <form className="transaction-form" onSubmit={handleSubmitAsset}>
               <div className="form-grid">
@@ -8208,42 +8321,33 @@ function App() {
     setStatusMessage(`Sezione aperta: ${sectionLabel}.`);
   };
 
-  const handleExportExcel = () => {
+  const handleExportExcel = async () => {
     const workbook = buildTransactionsWorkbook(transactions);
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = `registro-budget-transazioni-${getTodayIso()}.xlsx`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const saved = await saveGeneratedFile(`registro-budget-transazioni-${getTodayIso()}.xlsx`, blob);
+    if (!saved.success) {
+      setStatusMessage(saved.error || saved.message || 'Esportazione Excel non riuscita.');
+      return;
+    }
     setStatusMessage(`Esportate ${transactions.length} transazioni in Excel.`);
   };
 
-  const handleDownloadTemplate = () => {
+  const handleDownloadTemplate = async () => {
     const workbook = buildImportTemplateWorkbook();
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-
-    link.href = url;
-    link.download = 'template-import-transazioni.xlsx';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const saved = await saveGeneratedFile('template-import-transazioni.xlsx', blob);
+    if (!saved.success) {
+      setStatusMessage(saved.error || saved.message || 'Download del template non riuscito.');
+      return;
+    }
     setStatusMessage('Template Excel scaricato: compila il foglio Transazioni e reimportalo.');
   };
-
   const setPresetRange = (preset: 'questo-mese' | 'mese-scorso' | 'quest-anno' | 'ultimi-3-mesi' | 'tutto') => {
     const today = new Date();
     let start = '';
@@ -8785,7 +8889,7 @@ function App() {
 
           <div className="category-list">
             {categoryRows.map((category) => (
-              <div className="category-row" key={category.name} style={{ borderLeft: `4px solid ${category.color || 'var(--primary)'}` }}>
+              <div className="category-row" key={category.name} style={{ borderLeft: `4px solid ${category.color || 'var(--accent)'}` }}>
                 <div className="category-meta">
                   <div className="category-dot" style={{ background: category.color }} />
                   <div>
@@ -8815,11 +8919,11 @@ function App() {
               <h4>Entrate vs Uscite</h4>
               <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', marginTop: '4px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, #34d399, #10b981)' }} />
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, var(--success), var(--success-strong))' }} />
                   <span style={{ color: 'var(--muted)' }}>Entrate</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, #fb7185, #f43f5e)' }} />
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))' }} />
                   <span style={{ color: 'var(--muted)' }}>Uscite</span>
                 </div>
               </div>
@@ -8835,16 +8939,16 @@ function App() {
               return currentYearMonthlyData.map((point) => (
                 <div className="bar-column" key={point.label} style={{ gap: '6px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '0.7rem', lineHeight: 1.1, minHeight: '32px', justifyContent: 'end' }}>
-                    <span style={{ color: '#10b981', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
-                    <span style={{ color: '#f43f5e', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
+                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
+                    <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
                   </div>
                   <div className="bar-track" style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', justifyContent: 'center', padding: '4px' }}>
                     <span
                       title={`Entrate: ${formatEuro(point.income)}`}
                       style={{
                         height: `${Math.max((point.income / maxVal) * 100, 4)}%`,
-                        background: 'linear-gradient(180deg, #34d399, #10b981)',
-                        boxShadow: '0 8px 16px rgba(16, 185, 129, 0.16)',
+                        background: 'linear-gradient(180deg, var(--success), var(--success-strong))',
+                        boxShadow: '0 8px 16px var(--success-border)',
                         borderRadius: '6px',
                         width: '100%'
                       }}
@@ -8853,8 +8957,8 @@ function App() {
                       title={`Uscite: ${formatEuro(point.expenses)}`}
                       style={{
                         height: `${Math.max((point.expenses / maxVal) * 100, 4)}%`,
-                        background: 'linear-gradient(180deg, #fb7185, #f43f5e)',
-                        boxShadow: '0 8px 16px rgba(244, 63, 94, 0.16)',
+                        background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))',
+                        boxShadow: '0 8px 16px var(--danger-border)',
                         borderRadius: '6px',
                         width: '100%'
                       }}
@@ -8883,11 +8987,11 @@ function App() {
                   type="date"
                   value={reportRange.start}
                   style={{
-                    background: 'rgba(8, 16, 30, 0.6)',
+                    background: 'var(--input-bg)',
                     border: '1px solid var(--border)',
                     borderRadius: '8px',
                     padding: '4px 8px',
-                    color: '#fff',
+                    color: 'var(--text)',
                     marginTop: '2px',
                     font: 'inherit',
                     fontSize: '0.8rem'
@@ -8901,11 +9005,11 @@ function App() {
                   type="date"
                   value={reportRange.end}
                   style={{
-                    background: 'rgba(8, 16, 30, 0.6)',
+                    background: 'var(--input-bg)',
                     border: '1px solid var(--border)',
                     borderRadius: '8px',
                     padding: '4px 8px',
-                    color: '#fff',
+                    color: 'var(--text)',
                     marginTop: '2px',
                     font: 'inherit',
                     fontSize: '0.8rem'
@@ -9071,12 +9175,12 @@ function App() {
                       <div
                         key={`dash-legend-${cat.name}`}
                         style={{
-                          background: isCatActive ? 'rgba(255,255,255,0.03)' : 'transparent',
+                          background: isCatActive ? 'var(--overlay-subtle)' : 'transparent',
                           borderRadius: '10px',
                           padding: '6px 10px',
                           transition: 'all 0.2s ease',
                           cursor: 'pointer',
-                          border: isCatActive ? '1px solid rgba(255,255,255,0.06)' : '1px solid transparent'
+                          border: isCatActive ? '1px solid var(--border)' : '1px solid transparent'
                         }}
                         onClick={() => handleReportSliceClick(cat.name)}
                         onMouseEnter={() => setActiveCategory(cat.name)}
@@ -9183,7 +9287,7 @@ function App() {
                       ? 'amount positive'
                       : 'amount negative'
                   }
-                  style={isTransferCategory(transaction.category, transaction.subcategory) ? { color: '#38bdf8' } : undefined}
+                  style={isTransferCategory(transaction.category, transaction.subcategory) ? { color: 'var(--info)' } : undefined}
                 >
                   {isTransferCategory(transaction.category, transaction.subcategory)
                     ? `⇆ ${formatEuro(Math.abs(transaction.amount))}`
@@ -9310,7 +9414,7 @@ function App() {
             <div className="tx-summary-card">
               <div className="card-label">
                 <span>Saldo Netto Filtrato</span>
-                <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: filteredSummary.netTotal >= 0 ? 'rgba(52, 211, 153, 0.15)' : 'rgba(251, 113, 133, 0.15)', color: filteredSummary.netTotal >= 0 ? '#34d399' : '#fb7185' }}>
+                <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: filteredSummary.netTotal >= 0 ? 'var(--success-soft)' : 'var(--danger-soft)', color: filteredSummary.netTotal >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                   {filteredSummary.netTotal >= 0 ? 'Surplus' : 'Deficit'}
                 </span>
               </div>
@@ -9325,11 +9429,11 @@ function App() {
             <div className="tx-summary-card">
               <div className="card-label">
                 <span>Totale Entrate</span>
-                <span style={{ fontSize: '0.7rem', color: '#34d399', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--success)', fontWeight: 600 }}>
                   {filteredSummary.incomeCount} {filteredSummary.incomeCount === 1 ? 'accredito' : 'accrediti'}
                 </span>
               </div>
-              <div className="card-value" style={{ color: '#34d399' }}>
+              <div className="card-value" style={{ color: 'var(--success)' }}>
                 +{formatEuro(filteredSummary.totalIncome)}
               </div>
               <div className="card-subtext">
@@ -9340,11 +9444,11 @@ function App() {
             <div className="tx-summary-card">
               <div className="card-label">
                 <span>Totale Uscite / Spese</span>
-                <span style={{ fontSize: '0.7rem', color: '#fb7185', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--danger)', fontWeight: 600 }}>
                   {filteredSummary.expenseCount} {filteredSummary.expenseCount === 1 ? 'addebito' : 'addebiti'}
                 </span>
               </div>
-              <div className="card-value" style={{ color: '#fb7185' }}>
+              <div className="card-value" style={{ color: 'var(--danger)' }}>
                 -{formatEuro(filteredSummary.totalExpense)}
               </div>
               <div className="card-subtext">
@@ -9396,8 +9500,8 @@ function App() {
                         fontSize: '0.7rem',
                         padding: '1px 8px',
                         borderRadius: '999px',
-                        background: 'rgba(56, 189, 248, 0.15)',
-                        color: '#38bdf8',
+                        background: 'var(--info-soft)',
+                        color: 'var(--info)',
                         fontWeight: 650,
                       }}
                     >
@@ -9421,9 +9525,9 @@ function App() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     border: '1px solid',
-                    backgroundColor: filterReimbursement === 'pending' ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.08)',
-                    borderColor: filterReimbursement === 'pending' ? '#f59e0b' : 'rgba(245, 158, 11, 0.35)',
-                    color: '#f59e0b',
+                    backgroundColor: 'var(--warning-soft)',
+                    borderColor: filterReimbursement === 'pending' ? 'var(--warning)' : 'var(--warning-border)',
+                    color: 'var(--warning)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
@@ -9447,9 +9551,9 @@ function App() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     border: '1px solid',
-                    backgroundColor: filterReimbursement === 'reimbursed' ? 'rgba(16, 185, 129, 0.22)' : 'rgba(16, 185, 129, 0.08)',
-                    borderColor: filterReimbursement === 'reimbursed' ? '#10b981' : 'rgba(16, 185, 129, 0.35)',
-                    color: '#10b981',
+                    backgroundColor: 'var(--success-soft)',
+                    borderColor: filterReimbursement === 'reimbursed' ? 'var(--success)' : 'var(--success-border)',
+                    color: 'var(--success)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
@@ -9473,9 +9577,9 @@ function App() {
                     fontWeight: 650,
                     cursor: 'pointer',
                     border: '1px solid',
-                    backgroundColor: showReimbursementSchedule ? 'var(--accent)' : 'rgba(56, 189, 248, 0.12)',
-                    borderColor: showReimbursementSchedule ? 'var(--accent)' : 'rgba(56, 189, 248, 0.35)',
-                    color: showReimbursementSchedule ? 'var(--pill-primary-text)' : '#38bdf8',
+                    backgroundColor: showReimbursementSchedule ? 'var(--accent)' : 'var(--info-soft)',
+                    borderColor: showReimbursementSchedule ? 'var(--accent)' : 'var(--info-border)',
+                    color: showReimbursementSchedule ? 'var(--pill-primary-text)' : 'var(--info)',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
@@ -9536,11 +9640,11 @@ function App() {
                 </div>
                 <div className="tx-selection-item">
                   <span style={{ color: 'var(--muted)' }}>Entrate ({selectedSummary.incomeCount}):</span>
-                  <strong style={{ color: '#34d399' }}>+{formatEuro(selectedSummary.totalIncome)}</strong>
+                  <strong style={{ color: 'var(--success)' }}>+{formatEuro(selectedSummary.totalIncome)}</strong>
                 </div>
                 <div className="tx-selection-item">
                   <span style={{ color: 'var(--muted)' }}>Uscite ({selectedSummary.expenseCount}):</span>
-                  <strong style={{ color: '#fb7185' }}>-{formatEuro(selectedSummary.totalExpense)}</strong>
+                  <strong style={{ color: 'var(--danger)' }}>-{formatEuro(selectedSummary.totalExpense)}</strong>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -9626,7 +9730,7 @@ function App() {
                   className="text-button"
                   type="button"
                   onClick={handleResetAllFilters}
-                  style={{ fontSize: '0.8rem', color: '#fb7185', background: 'none', border: 'none', padding: '4px 8px', fontWeight: 600, cursor: 'pointer' }}
+                  style={{ fontSize: '0.8rem', color: 'var(--danger)', background: 'none', border: 'none', padding: '4px 8px', fontWeight: 600, cursor: 'pointer' }}
                 >
                   Resetta tutti i filtri ✕
                 </button>
@@ -9915,7 +10019,7 @@ function App() {
                       padding: '8px 12px',
                       borderRadius: '10px',
                       border: '1px solid var(--border)',
-                      background: 'rgba(7, 14, 26, 0.6)',
+                      background: 'var(--input-bg)',
                       color: 'var(--text)',
                       fontSize: '0.85rem'
                     }}
@@ -9939,7 +10043,7 @@ function App() {
                       padding: '8px 12px',
                       borderRadius: '10px',
                       border: '1px solid var(--border)',
-                      background: 'rgba(7, 14, 26, 0.6)',
+                      background: 'var(--input-bg)',
                       color: 'var(--text)',
                       fontSize: '0.85rem',
                       opacity: sortBy === 'custom' ? 0.5 : 1
@@ -10013,7 +10117,7 @@ function App() {
                     <strong>{selectedTransactions.length}</strong> {selectedTransactions.length === 1 ? 'transazione selezionata' : 'transazioni selezionate'}
                   </span>
                   <span className="bulk-editor-sum-badge">
-                    Totale importi: <strong style={{ color: selectedTransactionsSum >= 0 ? '#34d399' : '#fb7185' }}>{formatEuro(selectedTransactionsSum)}</strong>
+                    Totale importi: <strong style={{ color: selectedTransactionsSum >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatEuro(selectedTransactionsSum)}</strong>
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -10168,9 +10272,9 @@ function App() {
                               padding: '2px 8px',
                               borderRadius: '999px',
                               fontWeight: 650,
-                              background: 'rgba(16, 185, 129, 0.15)',
-                              color: '#10b981',
-                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              background: 'var(--success-soft)',
+                              color: 'var(--success)',
+                              border: '1px solid var(--success-border)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '3px',
@@ -10186,9 +10290,9 @@ function App() {
                               padding: '2px 8px',
                               borderRadius: '999px',
                               fontWeight: 650,
-                              background: 'rgba(56, 189, 248, 0.15)',
-                              color: '#38bdf8',
-                              border: '1px solid rgba(56, 189, 248, 0.3)',
+                              background: 'var(--info-soft)',
+                              color: 'var(--info)',
+                              border: '1px solid var(--info-border)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '3px',
@@ -10204,9 +10308,9 @@ function App() {
                               padding: '2px 8px',
                               borderRadius: '999px',
                               fontWeight: 650,
-                              background: 'rgba(245, 158, 11, 0.15)',
-                              color: '#f59e0b',
-                              border: '1px solid rgba(245, 158, 11, 0.3)',
+                              background: 'var(--warning-soft)',
+                              color: 'var(--warning)',
+                              border: '1px solid var(--warning-border)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '3px',
@@ -10224,9 +10328,9 @@ function App() {
                             padding: '2px 8px',
                             borderRadius: '999px',
                             fontWeight: 650,
-                            background: 'rgba(56, 189, 248, 0.12)',
-                            color: '#38bdf8',
-                            border: '1px solid rgba(56, 189, 248, 0.25)',
+                            background: 'var(--info-soft)',
+                            color: 'var(--info)',
+                            border: '1px solid var(--info-border)',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '3px',
@@ -10263,7 +10367,7 @@ function App() {
                         ? 'amount positive'
                         : 'amount negative'
                     }
-                    style={isTransferCategory(transaction.category, transaction.subcategory) ? { color: '#38bdf8' } : undefined}
+                    style={isTransferCategory(transaction.category, transaction.subcategory) ? { color: 'var(--info)' } : undefined}
                   >
                     {isTransferCategory(transaction.category, transaction.subcategory)
                       ? `⇆ ${formatEuro(Math.abs(transaction.amount))}`
@@ -10273,7 +10377,7 @@ function App() {
                     {reimbInfo && reimbInfo.status !== 'reimbursed' && (
                       <button
                         className="ghost-button"
-                        style={{ fontSize: '0.72rem', padding: '4px 8px', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)', background: 'rgba(16, 185, 129, 0.06)', whiteSpace: 'nowrap' }}
+                        style={{ fontSize: '0.72rem', padding: '4px 8px', color: 'var(--success)', borderColor: 'var(--success-border)', background: 'var(--success-soft)', whiteSpace: 'nowrap' }}
                         type="button"
                         onClick={() => handleStartReimbursementForExpense(transaction)}
                         title="Registra subito l'entrata per questo rimborso"
@@ -10286,7 +10390,7 @@ function App() {
                     </button>
                     <button
                       className="ghost-button"
-                      style={{ color: '#fb7185', borderColor: 'rgba(251, 113, 133, 0.24)', background: 'rgba(251, 113, 133, 0.05)' }}
+                      style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)', background: 'var(--danger-soft)' }}
                       type="button"
                       onClick={() => handleDeleteSpecificTransaction(transaction.id, transaction.merchant)}
                     >
@@ -10332,14 +10436,14 @@ function App() {
               <div>
                 <strong>Totale Vista ({filteredTransactions.length} movimenti)</strong>
                 <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px' }}>
-                  Entrate: <span style={{ color: '#34d399', fontWeight: 600 }}>+{formatEuro(filteredSummary.totalIncome)}</span> ({filteredSummary.incomeCount}) · Uscite: <span style={{ color: '#fb7185', fontWeight: 600 }}>-{formatEuro(filteredSummary.totalExpense)}</span> ({filteredSummary.expenseCount})
+                  Entrate: <span style={{ color: 'var(--success)', fontWeight: 600 }}>+{formatEuro(filteredSummary.totalIncome)}</span> ({filteredSummary.incomeCount}) · Uscite: <span style={{ color: 'var(--danger)', fontWeight: 600 }}>-{formatEuro(filteredSummary.totalExpense)}</span> ({filteredSummary.expenseCount})
                 </div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>
                   Saldo Complessivo Filtrato
                 </div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: filteredSummary.netTotal >= 0 ? '#34d399' : '#fb7185' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: filteredSummary.netTotal >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                   {formatSignedEuro(filteredSummary.netTotal)}
                 </div>
               </div>
@@ -10444,7 +10548,7 @@ function App() {
 
         <div className="category-list">
           {sortedCategoryRows.map((category) => (
-            <div className="category-row" key={category.id} style={{ borderLeft: `4px solid ${category.color || 'var(--primary)'}` }}>
+            <div className="category-row" key={category.id} style={{ borderLeft: `4px solid ${category.color || 'var(--accent)'}` }}>
               <div className="category-meta category-meta-stack">
                 <div className="category-meta-main">
                   <div className="category-dot" style={{ background: category.color }} />
@@ -10452,13 +10556,13 @@ function App() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <strong>{category.name}</strong>
                       {category.limitType === 'percentage' && (
-                        <span style={{ fontSize: '0.65rem', background: 'rgba(94, 234, 212, 0.15)', color: 'var(--primary)', padding: '1px 6px', borderRadius: '4px' }}>
+                        <span style={{ fontSize: '0.65rem', background: 'var(--accent-soft)', color: 'var(--accent)', padding: '1px 6px', borderRadius: '4px' }}>
                           % Limit ({category.limitPercent}%)
                         </span>
                       )}
                     </div>
                     {category.note && <p>{category.note}</p>}
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '4px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--muted)', marginTop: '4px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                       <span>Effettivo: <strong>{formatEuro(category.actualSpent)}</strong></span>
                       {category.expectedSpent > 0 && (
                         <span>• Previsto: <strong>{formatEuro(category.expectedSpent)}</strong></span>
@@ -10475,7 +10579,7 @@ function App() {
                         <small style={{ fontSize: '0.72rem' }}>
                           {formatEuro(subcategory.spent)} / {formatEuro(subcategory.limit)} {subcategory.limitType === 'percentage' && `(${subcategory.limitPercent}%)`}
                         </small>
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                        <span style={{ fontSize: '0.65rem', color: 'var(--muted)' }}>
                           Eff: {formatEuro(subcategory.actualSpent)} {subcategory.expectedSpent > 0 && ` • Prev: ${formatEuro(subcategory.expectedSpent)}`}
                         </span>
                       </div>
@@ -10576,7 +10680,7 @@ function App() {
       {showNetWorthExplanation && (
         <div style={{
           background: 'var(--panel-card-bg)',
-          border: '1px solid rgba(94, 234, 212, 0.28)',
+          border: '1px solid var(--accent-border)',
           borderRadius: '22px',
           padding: '22px',
           boxShadow: 'var(--shadow)',
@@ -10600,7 +10704,7 @@ function App() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
-            <div style={{ background: 'rgba(148, 163, 184, 0.05)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
+            <div style={{ background: 'var(--overlay-subtle)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
               <p style={{ margin: '0 0 6px', fontWeight: 650, color: 'var(--text)', fontSize: '0.85rem' }}>
                 1. Patrimonio Netto Complessivo
               </p>
@@ -10612,11 +10716,11 @@ function App() {
               </p>
             </div>
 
-            <div style={{ background: 'rgba(148, 163, 184, 0.05)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
+            <div style={{ background: 'var(--overlay-subtle)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
               <p style={{ margin: '0 0 6px', fontWeight: 650, color: 'var(--text)', fontSize: '0.85rem' }}>
                 2. Liquidità Disponibile (Cassa Conti)
               </p>
-              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: '#38bdf8' }}>
+              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: 'var(--info)' }}>
                 Liquidità = Cassa Iniziale + Entrate - Uscite
               </div>
               <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--muted)', lineHeight: '1.4' }}>
@@ -10624,11 +10728,11 @@ function App() {
               </p>
             </div>
 
-            <div style={{ background: 'rgba(148, 163, 184, 0.05)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
+            <div style={{ background: 'var(--overlay-subtle)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
               <p style={{ margin: '0 0 6px', fontWeight: 650, color: 'var(--text)', fontSize: '0.85rem' }}>
                 3. Attività e Valutazione Investimenti
               </p>
-              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: '#34d399' }}>
+              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: 'var(--success)' }}>
                 Valore Titolo = Quantità Detenuta × Prezzo di Mercato
               </div>
               <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--muted)', lineHeight: '1.4' }}>
@@ -10636,11 +10740,11 @@ function App() {
               </p>
             </div>
 
-            <div style={{ background: 'rgba(148, 163, 184, 0.05)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
+            <div style={{ background: 'var(--overlay-subtle)', padding: '14px', borderRadius: '14px', border: '1px solid var(--border)' }}>
               <p style={{ margin: '0 0 6px', fontWeight: 650, color: 'var(--text)', fontSize: '0.85rem' }}>
                 4. Passività e Fondo Emergenza
               </p>
-              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: '#f59e0b' }}>
+              <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: 'var(--input-bg)', padding: '6px 10px', borderRadius: '8px', marginBottom: '8px', color: 'var(--warning)' }}>
                 Autonomia (Mesi) = Patrimonio / Spesa Media Mensile
               </div>
               <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--muted)', lineHeight: '1.4' }}>
@@ -10801,7 +10905,7 @@ function App() {
                         fontSize: '0.7rem',
                         padding: '3px 8px',
                         borderRadius: '8px',
-                        background: 'rgba(94, 234, 212, 0.08)',
+                        background: 'var(--accent-soft)',
                         color: 'var(--accent)',
                         fontWeight: 600
                       }}>
@@ -10820,19 +10924,19 @@ function App() {
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '0.725rem', color: 'var(--muted)' }}>Totale Entrate</span>
-                        <strong style={{ fontSize: '0.95rem', color: '#34d399' }}>+{formatEuro(acc.rangeIncomes)}</strong>
+                        <strong style={{ fontSize: '0.95rem', color: 'var(--success)' }}>+{formatEuro(acc.rangeIncomes)}</strong>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '0.725rem', color: 'var(--muted)' }}>Totale Uscite</span>
-                        <strong style={{ fontSize: '0.95rem', color: '#fb7185' }}>-{formatEuro(acc.rangeExpenses)}</strong>
+                        <strong style={{ fontSize: '0.95rem', color: 'var(--danger)' }}>-{formatEuro(acc.rangeExpenses)}</strong>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '0.725rem', color: 'var(--muted)' }}>Liquidità</span>
-                        <strong style={{ fontSize: '0.95rem', color: '#38bdf8' }}>{formatEuro(acc.liquidity)}</strong>
+                        <strong style={{ fontSize: '0.95rem', color: 'var(--info)' }}>{formatEuro(acc.liquidity)}</strong>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '0.725rem', color: 'var(--muted)' }}>Asset</span>
-                        <strong style={{ fontSize: '0.95rem', color: '#c084fc' }}>{formatEuro(acc.assetsValue)}</strong>
+                        <strong style={{ fontSize: '0.95rem', color: 'var(--chart-3)' }}>{formatEuro(acc.assetsValue)}</strong>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <span style={{ fontSize: '0.725rem', color: 'var(--muted)', fontWeight: 600 }}>Bilancio Totale</span>
@@ -10847,8 +10951,8 @@ function App() {
                           <span>Asset: {acc.totalBalance > 0 ? ((Math.max(0, acc.assetsValue) / acc.totalBalance) * 100).toFixed(0) : '0'}%</span>
                         </div>
                         <div style={{ height: '4px', borderRadius: '2px', background: 'var(--overlay-subtle)', display: 'flex', overflow: 'hidden' }}>
-                          <div style={{ width: `${acc.totalBalance > 0 ? (Math.max(0, acc.liquidity) / acc.totalBalance) * 100 : 0}%`, background: '#38bdf8' }} />
-                          <div style={{ width: `${acc.totalBalance > 0 ? (Math.max(0, acc.assetsValue) / acc.totalBalance) * 100 : 0}%`, background: '#c084fc' }} />
+                          <div style={{ width: `${acc.totalBalance > 0 ? (Math.max(0, acc.liquidity) / acc.totalBalance) * 100 : 0}%`, background: 'var(--info)' }} />
+                          <div style={{ width: `${acc.totalBalance > 0 ? (Math.max(0, acc.assetsValue) / acc.totalBalance) * 100 : 0}%`, background: 'var(--chart-3)' }} />
                         </div>
                       </div>
                     )}
@@ -10953,7 +11057,7 @@ function App() {
                 delta="Saldo generato dalle transazioni filtrate"
                 subValue={
                   <span style={{ color: 'var(--muted)', fontSize: '0.73rem' }}>
-                    Mese prec: <strong style={{ color: previousMonthNetFlow >= 0 ? '#10b981' : '#f43f5e' }}>{formatSignedEuro(previousMonthNetFlow)}</strong>
+                    Mese prec: <strong style={{ color: previousMonthNetFlow >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatSignedEuro(previousMonthNetFlow)}</strong>
                   </span>
                 }
               />
@@ -10982,11 +11086,11 @@ function App() {
                   </div>
                   <div style={{ display: 'flex', gap: '14px', fontSize: '0.8rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, #34d399, #10b981)' }} />
+                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, var(--success), var(--success-strong))' }} />
                       <span>Entrate</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, #fb7185, #f43f5e)' }} />
+                      <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))' }} />
                       <span>Uscite</span>
                     </div>
                   </div>
@@ -11002,16 +11106,16 @@ function App() {
                   return currentYearMonthlyData.map((point) => (
                     <div className="bar-column" key={point.label} style={{ gap: '6px' }}>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '0.72rem', lineHeight: 1.1, minHeight: '32px', justifyContent: 'end' }}>
-                        <span style={{ color: '#10b981', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
-                        <span style={{ color: '#f43f5e', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
+                        <span style={{ color: 'var(--success)', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
+                        <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
                       </div>
                       <div className="bar-track" style={{ display: 'flex', gap: '5px', alignItems: 'flex-end', justifyContent: 'center', padding: '5px' }}>
                         <span
                           title={`Entrate: ${formatEuro(point.income)}`}
                           style={{
                             height: `${Math.max((point.income / maxVal) * 100, 4)}%`,
-                            background: 'linear-gradient(180deg, #34d399, #10b981)',
-                            boxShadow: '0 8px 16px rgba(16, 185, 129, 0.16)',
+                            background: 'linear-gradient(180deg, var(--success), var(--success-strong))',
+                            boxShadow: '0 8px 16px var(--success-border)',
                             borderRadius: '6px',
                             width: '100%'
                           }}
@@ -11020,8 +11124,8 @@ function App() {
                           title={`Uscite: ${formatEuro(point.expenses)}`}
                           style={{
                             height: `${Math.max((point.expenses / maxVal) * 100, 4)}%`,
-                            background: 'linear-gradient(180deg, #fb7185, #f43f5e)',
-                            boxShadow: '0 8px 16px rgba(244, 63, 94, 0.16)',
+                            background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))',
+                            boxShadow: '0 8px 16px var(--danger-border)',
                             borderRadius: '6px',
                             width: '100%'
                           }}
@@ -11567,9 +11671,9 @@ function App() {
                 <h3>{formatEuro(projectedRemainingPACs)}</h3>
                 <span className="metric-delta">{pacsCount} quote di investimento</span>
               </div>
-              <div className="metric-card" style={{ borderLeftColor: (projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs) >= 0 ? '#34d399' : '#fb7185' }}>
+              <div className="metric-card" style={{ borderLeftColor: (projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                 <p className="metric-label">Flusso Netto Atteso</p>
-                <h3 style={{ color: (projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs) >= 0 ? '#34d399' : '#fb7185' }}>
+                <h3 style={{ color: (projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                   {(projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs) >= 0 ? '+' : ''}
                   {formatEuro(projectedRemainingRecurringIncomes - projectedRemainingRecurringExpenses - projectedRemainingPACs)}
                 </h3>
@@ -11588,8 +11692,8 @@ function App() {
                 style={{
                   padding: '12px 16px',
                   borderRadius: '12px',
-                  background: minProjectedBalance < 0 ? 'rgba(251, 113, 133, 0.08)' : 'rgba(52, 211, 153, 0.08)',
-                  border: `1px solid ${minProjectedBalance < 0 ? 'rgba(251, 113, 133, 0.3)' : 'rgba(52, 211, 153, 0.25)'}`,
+                  background: minProjectedBalance < 0 ? 'var(--danger-soft)' : 'var(--success-soft)',
+                  border: `1px solid ${minProjectedBalance < 0 ? 'var(--danger-border)' : 'var(--success-border)'}`,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
@@ -11597,7 +11701,7 @@ function App() {
               >
                 <span style={{ fontSize: '1.4rem' }}>{minProjectedBalance < 0 ? '⚠️' : '🛡️'}</span>
                 <div>
-                  <strong style={{ fontSize: '0.85rem', color: minProjectedBalance < 0 ? '#fb7185' : '#34d399', display: 'block' }}>
+                  <strong style={{ fontSize: '0.85rem', color: minProjectedBalance < 0 ? 'var(--danger)' : 'var(--success)', display: 'block' }}>
                     {minProjectedBalance < 0 ? 'Attenzione: Rischio Scoperto di Cassa' : 'Sicurezza Liquidità Ottimale'}
                   </strong>
                   <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
@@ -11612,8 +11716,8 @@ function App() {
                 style={{
                   padding: '12px 16px',
                   borderRadius: '12px',
-                  background: 'rgba(56, 189, 248, 0.06)',
-                  border: '1px solid rgba(56, 189, 248, 0.2)',
+                  background: 'var(--info-soft)',
+                  border: '1px solid var(--info-border)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
@@ -11621,11 +11725,11 @@ function App() {
               >
                 <span style={{ fontSize: '1.4rem' }}>⚡</span>
                 <div>
-                  <strong style={{ fontSize: '0.85rem', color: '#38bdf8', display: 'block' }}>
+                  <strong style={{ fontSize: '0.85rem', color: 'var(--info)', display: 'block' }}>
                     In scadenza entro 7 giorni: {dueIn7DaysMovements.length} moviment{dueIn7DaysMovements.length === 1 ? 'o' : 'i'}
                   </strong>
                   <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>
-                    Uscite/PAC: <strong style={{ color: '#fb7185' }}>-{formatEuro(dueIn7DaysExpenses)}</strong> · Entrate: <strong style={{ color: '#34d399' }}>+{formatEuro(dueIn7DaysIncomes)}</strong>
+                    Uscite/PAC: <strong style={{ color: 'var(--danger)' }}>-{formatEuro(dueIn7DaysExpenses)}</strong> · Entrate: <strong style={{ color: 'var(--success)' }}>+{formatEuro(dueIn7DaysIncomes)}</strong>
                   </span>
                 </div>
               </div>
@@ -11673,9 +11777,9 @@ function App() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     border: '1px solid',
-                    borderColor: scadenziarioTypeFilter === 'expense' ? '#fb7185' : 'var(--border)',
-                    background: scadenziarioTypeFilter === 'expense' ? 'rgba(251, 113, 133, 0.2)' : 'transparent',
-                    color: scadenziarioTypeFilter === 'expense' ? '#fb7185' : 'var(--muted)',
+                    borderColor: scadenziarioTypeFilter === 'expense' ? 'var(--danger)' : 'var(--border)',
+                    background: scadenziarioTypeFilter === 'expense' ? 'var(--danger-soft)' : 'transparent',
+                    color: scadenziarioTypeFilter === 'expense' ? 'var(--danger)' : 'var(--muted)',
                   }}
                 >
                   Uscite ({expensesCount})
@@ -11690,9 +11794,9 @@ function App() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     border: '1px solid',
-                    borderColor: scadenziarioTypeFilter === 'income' ? '#34d399' : 'var(--border)',
-                    background: scadenziarioTypeFilter === 'income' ? 'rgba(52, 211, 153, 0.2)' : 'transparent',
-                    color: scadenziarioTypeFilter === 'income' ? '#34d399' : 'var(--muted)',
+                    borderColor: scadenziarioTypeFilter === 'income' ? 'var(--success)' : 'var(--border)',
+                    background: scadenziarioTypeFilter === 'income' ? 'var(--success-soft)' : 'transparent',
+                    color: scadenziarioTypeFilter === 'income' ? 'var(--success)' : 'var(--muted)',
                   }}
                 >
                   Entrate ({incomesCount})
@@ -11707,9 +11811,9 @@ function App() {
                     fontWeight: 600,
                     cursor: 'pointer',
                     border: '1px solid',
-                    borderColor: scadenziarioTypeFilter === 'pac' ? '#38bdf8' : 'var(--border)',
-                    background: scadenziarioTypeFilter === 'pac' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                    color: scadenziarioTypeFilter === 'pac' ? '#38bdf8' : 'var(--muted)',
+                    borderColor: scadenziarioTypeFilter === 'pac' ? 'var(--info)' : 'var(--border)',
+                    background: scadenziarioTypeFilter === 'pac' ? 'var(--info-soft)' : 'transparent',
+                    color: scadenziarioTypeFilter === 'pac' ? 'var(--info)' : 'var(--muted)',
                   }}
                 >
                   PAC ({pacsCount})
@@ -11806,29 +11910,29 @@ function App() {
                       {filteredMovements.map((mv) => {
                         const countdownBadge =
                           mv.daysRemaining === 0 ? (
-                            <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(251, 113, 133, 0.2)', color: '#fb7185' }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'var(--danger-soft)', color: 'var(--danger)' }}>
                               Oggi
                             </span>
                           ) : mv.daysRemaining === 1 ? (
-                            <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.2)', color: '#f59e0b' }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: 'var(--warning-soft)', color: 'var(--warning)' }}>
                               Domani
                             </span>
                           ) : mv.daysRemaining <= 7 ? (
-                            <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8' }}>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 600, padding: '2px 6px', borderRadius: '4px', background: 'var(--info-soft)', color: 'var(--info)' }}>
                               Tra {mv.daysRemaining} gg
                             </span>
                           ) : (
-                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--muted)' }}>
+                            <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', background: 'var(--overlay-subtle)', color: 'var(--muted)' }}>
                               Tra {mv.daysRemaining} gg
                             </span>
                           );
 
                         const balanceColor =
                           (mv.projectedBalanceAfter ?? 0) < 0
-                            ? '#fb7185'
+                            ? 'var(--danger)'
                             : (mv.projectedBalanceAfter ?? 0) < 1000
-                            ? '#f59e0b'
-                            : '#34d399';
+                            ? 'var(--warning)'
+                            : 'var(--success)';
 
                         return (
                           <tr key={mv.id}>
@@ -11858,11 +11962,11 @@ function App() {
                                   fontWeight: 600,
                                   backgroundColor:
                                     mv.kind === 'income'
-                                      ? 'rgba(52, 211, 153, 0.15)'
+                                      ? 'var(--success-soft)'
                                       : mv.kind === 'expense'
-                                      ? 'rgba(251, 113, 133, 0.15)'
-                                      : 'rgba(56, 189, 248, 0.15)',
-                                  color: mv.kind === 'income' ? '#34d399' : mv.kind === 'expense' ? '#fb7185' : '#38bdf8',
+                                      ? 'var(--danger-soft)'
+                                      : 'var(--info-soft)',
+                                  color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : 'var(--info)',
                                 }}
                               >
                                 {mv.kind === 'income' ? 'Entrata' : mv.kind === 'expense' ? 'Uscita' : 'PAC'}
@@ -11881,7 +11985,7 @@ function App() {
                                 textAlign: 'right',
                                 fontWeight: 700,
                                 fontFamily: 'var(--font-mono)',
-                                color: mv.kind === 'income' ? '#34d399' : mv.kind === 'expense' ? '#fb7185' : '#38bdf8',
+                                color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : 'var(--info)',
                               }}
                             >
                               {mv.kind === 'income' ? '+' : '-'}{formatEuro(mv.amount)}
@@ -12118,7 +12222,7 @@ function App() {
                         padding: '1rem',
                         border: '1px solid var(--border)',
                         borderRadius: '12px',
-                        backgroundColor: tx.isActive ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255,255,255,0.01)',
+                        backgroundColor: 'var(--overlay-subtle)',
                         opacity: tx.isActive ? 1 : 0.6,
                         display: 'flex',
                         justifyContent: 'space-between',
@@ -12132,14 +12236,14 @@ function App() {
                             width: '8px',
                             height: '8px',
                             borderRadius: '50%',
-                            backgroundColor: tx.kind === 'income' ? '#34d399' : '#fb7185'
+                            backgroundColor: tx.kind === 'income' ? 'var(--success)' : 'var(--danger)'
                           }} />
                           <strong style={{ fontSize: '0.95rem' }}>{tx.merchant}</strong>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'rgba(255,255,255,0.06)', padding: '2px 6px', borderRadius: '4px' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-medium)', padding: '2px 6px', borderRadius: '4px' }}>
                             {tx.frequency === 'monthly' ? `Ogni il ${tx.dayOfMonth}° del mese` : tx.frequency === 'weekly' ? 'Ogni settimana' : `Ogni ${tx.intervalDays} giorni`}
                           </span>
                           {tx.autoPost && (
-                            <span style={{ fontSize: '0.7rem', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--success)', background: 'var(--success-soft)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
                               Auto-Registra ⚡
                             </span>
                           )}
@@ -12154,7 +12258,7 @@ function App() {
                           fontFamily: 'var(--font-mono)',
                           fontWeight: 700,
                           fontSize: '1rem',
-                          color: tx.kind === 'income' ? '#34d399' : '#fb7185',
+                          color: tx.kind === 'income' ? 'var(--success)' : 'var(--danger)',
                           marginRight: '4px'
                         }}>
                           {tx.kind === 'income' ? '+' : '-'}{formatEuro(tx.amount)}
@@ -12167,8 +12271,8 @@ function App() {
                           style={{
                             padding: '4px 8px',
                             fontSize: '0.7rem',
-                            background: tx.isActive ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255, 255, 255, 0.08)',
-                            color: tx.isActive ? '#34d399' : 'var(--muted)',
+                            background: tx.isActive ? 'var(--success-soft)' : 'var(--overlay-medium)',
+                            color: tx.isActive ? 'var(--success)' : 'var(--muted)',
                           }}
                         >
                           {tx.isActive ? 'Attivo' : 'Pausa'}
@@ -12181,8 +12285,8 @@ function App() {
                           style={{
                             padding: '4px 8px',
                             fontSize: '0.7rem',
-                            background: editingRecurringId === tx.id ? 'var(--accent)' : 'rgba(56, 189, 248, 0.15)',
-                            color: editingRecurringId === tx.id ? '#07111f' : '#38bdf8',
+                            background: editingRecurringId === tx.id ? 'var(--accent)' : 'var(--info-soft)',
+                            color: editingRecurringId === tx.id ? 'var(--pill-primary-text)' : 'var(--info)',
                             fontWeight: editingRecurringId === tx.id ? 700 : 500
                           }}
                         >
@@ -12196,8 +12300,8 @@ function App() {
                           style={{
                             padding: '4px 8px',
                             fontSize: '0.7rem',
-                            background: 'rgba(251, 113, 133, 0.12)',
-                            color: '#fb7185'
+                            background: 'var(--danger-soft)',
+                            color: 'var(--danger)'
                           }}
                         >
                           Elimina
@@ -12306,8 +12410,8 @@ function App() {
                     marginTop: '1rem',
                     padding: '0.85rem',
                     borderRadius: '10px',
-                    background: 'rgba(56, 189, 248, 0.05)',
-                    border: '1px solid rgba(56, 189, 248, 0.15)',
+                    background: 'var(--info-soft)',
+                    border: '1px solid var(--info-border)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '0.6rem'
@@ -12380,7 +12484,7 @@ function App() {
                           padding: '1rem',
                           border: '1px solid var(--border)',
                           borderRadius: '12px',
-                          backgroundColor: pac.isActive ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255,255,255,0.01)',
+                          backgroundColor: 'var(--overlay-subtle)',
                           opacity: pac.isActive ? 1 : 0.65,
                           display: 'flex',
                           flexDirection: 'column',
@@ -12394,10 +12498,10 @@ function App() {
                                 width: '8px',
                                 height: '8px',
                                 borderRadius: '50%',
-                                backgroundColor: '#38bdf8'
+                                backgroundColor: 'var(--info)'
                               }} />
                               <strong style={{ fontSize: '1rem' }}>{pac.name}</strong>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '6px' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-medium)', padding: '2px 8px', borderRadius: '6px' }}>
                                 Ogni {pac.dayOfMonth}° del mese
                               </span>
                               <span
@@ -12409,9 +12513,9 @@ function App() {
                                   borderRadius: '6px',
                                   cursor: 'pointer',
                                   fontWeight: 600,
-                                  backgroundColor: isAuto ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.08)',
-                                  color: isAuto ? '#38bdf8' : 'var(--muted)',
-                                  border: isAuto ? '1px solid rgba(56, 189, 248, 0.3)' : '1px solid var(--border)',
+                                  backgroundColor: isAuto ? 'var(--info-soft)' : 'var(--overlay-medium)',
+                                  color: isAuto ? 'var(--info)' : 'var(--muted)',
+                                  border: isAuto ? '1px solid var(--info-border)' : '1px solid var(--border)',
                                 }}
                               >
                                 {isAuto ? '⚡ Auto-inserimento: ON' : '⏸ Auto-inserimento: OFF'}
@@ -12421,7 +12525,7 @@ function App() {
                               Asset: <strong style={{ color: 'var(--text)' }}>{targetAsset ? targetAsset.name : 'Sconosciuto'}</strong> · Conto addebito: <strong>{debitAccount}</strong> · Inizio: {formatDisplayDate(pac.startDate)}
                             </p>
                             {pac.lastPostedDate && (
-                              <p style={{ fontSize: '0.75rem', color: '#34d399', margin: '4px 0 0 0' }}>
+                              <p style={{ fontSize: '0.75rem', color: 'var(--success)', margin: '4px 0 0 0' }}>
                                 ✓ Ultima rata registrata: {formatDisplayDate(pac.lastPostedDate)}
                               </p>
                             )}
@@ -12432,7 +12536,7 @@ function App() {
                               fontFamily: 'var(--font-mono)',
                               fontWeight: 700,
                               fontSize: '1.1rem',
-                              color: '#38bdf8',
+                              color: 'var(--info)',
                               display: 'block'
                             }}>
                               {formatEuro(pac.amount)}
@@ -12441,7 +12545,7 @@ function App() {
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.05)', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
                           <button
                             className="pill"
                             type="button"
@@ -12450,9 +12554,9 @@ function App() {
                             style={{
                               padding: '4px 10px',
                               fontSize: '0.75rem',
-                              background: 'rgba(56, 189, 248, 0.12)',
-                              color: '#38bdf8',
-                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                              background: 'var(--info-soft)',
+                              color: 'var(--info)',
+                              border: '1px solid var(--info-border)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px'
@@ -12468,8 +12572,8 @@ function App() {
                             style={{
                               padding: '4px 10px',
                               fontSize: '0.75rem',
-                              background: pac.isActive ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255, 255, 255, 0.08)',
-                              color: pac.isActive ? '#34d399' : 'var(--muted)',
+                              background: pac.isActive ? 'var(--success-soft)' : 'var(--overlay-medium)',
+                              color: pac.isActive ? 'var(--success)' : 'var(--muted)',
                             }}
                           >
                             {pac.isActive ? 'Attivo' : 'In Pausa'}
@@ -12482,7 +12586,7 @@ function App() {
                             style={{
                               padding: '4px 10px',
                               fontSize: '0.75rem',
-                              background: 'rgba(255, 255, 255, 0.08)',
+                              background: 'var(--overlay-medium)',
                               color: 'var(--text)',
                             }}
                           >
@@ -12496,8 +12600,8 @@ function App() {
                             style={{
                               padding: '4px 10px',
                               fontSize: '0.75rem',
-                              background: 'rgba(251, 113, 133, 0.12)',
-                              color: '#fb7185'
+                              background: 'var(--danger-soft)',
+                              color: 'var(--danger)'
                             }}
                           >
                             Rimuovi
@@ -12548,7 +12652,7 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--overlay-subtle)', padding: '12px 14px', borderRadius: '14px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '8px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                {hideNumbers ? <EyeOff size={16} color="#f87171" /> : <Eye size={16} color="var(--accent)" />}
+                {hideNumbers ? <EyeOff size={16} color="var(--danger)" /> : <Eye size={16} color="var(--accent)" />}
                 Oscuramento dati finanziari
               </span>
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>Nascondi tutti i saldi, transazioni e dettagli patrimoniali per lavorare in sicurezza in pubblico</span>
@@ -12566,8 +12670,8 @@ function App() {
                 borderRadius: '8px',
                 fontSize: '0.78rem',
                 fontWeight: 600,
-                background: hideNumbers ? '#ef4444' : 'var(--accent)',
-                color: '#ffffff',
+                background: hideNumbers ? 'var(--danger)' : 'var(--accent)',
+                color: 'var(--pill-primary-text)',
                 transition: 'all 0.15s ease',
                 border: '0',
                 cursor: 'pointer',
@@ -12588,7 +12692,7 @@ function App() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--overlay-subtle)', padding: '12px 14px', borderRadius: '14px', border: '1px solid var(--border)', flexWrap: 'wrap', gap: '10px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
               <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <BellRing size={16} color="#38bdf8" />
+                <BellRing size={16} color="var(--info)" />
                 Notifiche di Sistema su Mac
               </span>
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
@@ -12604,14 +12708,14 @@ function App() {
                 borderRadius: '8px',
                 fontSize: '0.78rem',
                 fontWeight: 600,
-                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
-                color: '#ffffff',
+                background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
+                color: 'var(--on-solid)',
                 border: '0',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
-                boxShadow: '0 2px 8px rgba(14, 165, 233, 0.25)',
+                boxShadow: '0 2px 8px var(--info-border)',
               }}
             >
               <Bell size={14} />
@@ -12641,7 +12745,7 @@ function App() {
                   fontSize: '0.78rem',
                   fontWeight: 600,
                   background: theme === 'light' ? 'var(--accent)' : 'transparent',
-                  color: theme === 'light' ? (theme === 'light' ? '#ffffff' : '#07111f') : 'var(--muted)',
+                  color: theme === 'light' ? 'var(--pill-primary-text)' : 'var(--muted)',
                   transition: 'all 0.15s ease',
                   border: '0',
                   cursor: 'pointer'
@@ -12661,7 +12765,7 @@ function App() {
                   fontSize: '0.78rem',
                   fontWeight: 600,
                   background: theme === 'dark' ? 'var(--accent)' : 'transparent',
-                  color: theme === 'dark' ? '#07111f' : 'var(--muted)',
+                  color: theme === 'dark' ? 'var(--pill-primary-text)' : 'var(--muted)',
                   transition: 'all 0.15s ease',
                   border: '0',
                   cursor: 'pointer'
@@ -12724,8 +12828,8 @@ function App() {
                     height: '32px',
                     borderRadius: '50%',
                     background: preset.value,
-                    border: accentColor === preset.value ? '3px solid var(--text)' : '1px solid rgba(0,0,0,0.2)',
-                    boxShadow: accentColor === preset.value ? '0 0 10px rgba(0,0,0,0.4)' : 'none',
+                    border: accentColor === preset.value ? '3px solid var(--text)' : '1px solid var(--scrim)',
+                    boxShadow: accentColor === preset.value ? '0 0 10px var(--scrim)' : 'none',
                     cursor: 'pointer',
                     transition: 'transform 0.15s ease',
                   }}
@@ -12816,9 +12920,9 @@ function App() {
               fontWeight: 700,
               padding: '4px 10px',
               borderRadius: '100px',
-              background: 'rgba(56, 189, 248, 0.15)',
-              color: '#38bdf8',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
+              background: 'var(--info-soft)',
+              color: 'var(--info)',
+              border: '1px solid var(--info-border)',
             }}
           >
             Versione attuale: v{APP_VERSION}
@@ -12870,8 +12974,8 @@ function App() {
                 borderRadius: '8px',
                 fontSize: '0.8rem',
                 fontWeight: 600,
-                background: autoCheckUpdates ? '#10b981' : 'var(--overlay-medium)',
-                color: '#ffffff',
+                background: autoCheckUpdates ? 'var(--success)' : 'var(--overlay-medium)',
+                color: 'var(--on-solid)',
                 border: '0',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
@@ -13030,7 +13134,8 @@ function App() {
                   gap: '6px',
                 }}
               >
-                🔔 Centro Notifiche
+                <Bell size={16} aria-hidden="true" />
+                <span>Centro Notifiche</span>
               </button>
             </div>
 
@@ -13066,12 +13171,12 @@ function App() {
                 padding: '10px 14px',
                 borderRadius: '10px',
                 background: manualCheckFeedback.includes('Nuovo')
-                  ? 'rgba(14, 165, 233, 0.12)'
+                  ? 'var(--info-soft)'
                   : 'var(--overlay-subtle)',
                 border: manualCheckFeedback.includes('Nuovo')
-                  ? '1px solid rgba(14, 165, 233, 0.3)'
+                  ? '1px solid var(--info-border)'
                   : '1px solid var(--border)',
-                color: manualCheckFeedback.includes('Nuovo') ? '#38bdf8' : 'var(--text)',
+                color: manualCheckFeedback.includes('Nuovo') ? 'var(--info)' : 'var(--text)',
                 fontSize: '0.82rem',
                 display: 'flex',
                 alignItems: 'center',
@@ -13089,8 +13194,8 @@ function App() {
       <article className="panel large-panel">
         <div className="panel-header" style={{ flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <p className="panel-title">Archiviazione & Sincronizzazione File Dati (macOS &amp; iCloud Drive)</p>
-            <h4>Posizione principale scelta e sincronizzazione sul tuo Mac</h4>
+            <p className="panel-title">{dataPanelTitle}</p>
+            <h4>Posizione principale scelta e sincronizzazione sul tuo {deviceLabel}</h4>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             {dataFileInfo?.isICloud && (
@@ -13100,9 +13205,9 @@ function App() {
                   fontWeight: 700,
                   padding: '4px 10px',
                   borderRadius: '999px',
-                  background: 'rgba(56, 189, 248, 0.16)',
-                  color: '#38bdf8',
-                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  background: 'var(--info-soft)',
+                  color: 'var(--info)',
+                  border: '1px solid var(--info-border)',
                 }}
               >
                 ☁️ iCloud Drive Attivo
@@ -13114,9 +13219,9 @@ function App() {
                 fontWeight: 700,
                 padding: '4px 10px',
                 borderRadius: '999px',
-                background: 'rgba(16, 185, 129, 0.16)',
-                color: '#10b981',
-                border: '1px solid rgba(16, 185, 129, 0.35)',
+                background: 'var(--success-soft)',
+                color: 'var(--success)',
+                border: '1px solid var(--success-border)',
               }}
             >
               {dataFileInfo?.isCustomPrimary ? '📌 Posizione Principale Fissata ✓' : '📌 Posizione Principale Attiva'}
@@ -13124,7 +13229,7 @@ function App() {
           </div>
         </div>
         <p className="import-hint" style={{ marginBottom: '1.2rem' }}>
-          Scegli dove salvare <code>user-data.json</code> su macOS (anche dentro <strong>iCloud Drive</strong>): la posizione scelta rimarrà bloccata come <strong>principale</strong> ad ogni avvio.
+          {dataPanelHint}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -13146,9 +13251,9 @@ function App() {
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    backgroundColor: '#10b981',
+                    backgroundColor: 'var(--success)',
                     display: 'inline-block',
-                    boxShadow: '0 0 8px #10b981',
+                    boxShadow: '0 0 8px var(--success)',
                   }}
                 />
                 <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--text)' }}>
@@ -13231,7 +13336,7 @@ function App() {
             <div style={{ display: 'flex', gap: '16px', fontSize: '0.75rem', color: 'var(--muted)', marginTop: '2px', flexWrap: 'wrap' }}>
               <span>
                 Stato posizione:{' '}
-                <strong style={{ color: '#10b981' }}>
+                <strong style={{ color: 'var(--success)' }}>
                   {dataFileInfo?.isCustomPrimary
                     ? 'Posizione principale bloccata (non cambia mai in automatico) ✓'
                     : dataFileInfo?.exists
@@ -13254,7 +13359,9 @@ function App() {
                   onClick={() => handleChooseSaveDataLocation(true)}
                   style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
                 >
-                  📍 Scegli posizione dove salvare user-data.json (anche iCloud)...
+                  {isIOSPlatform
+                    ? '📁 Scegli la cartella per user-data.json (anche iCloud Drive)…'
+                    : '📍 Scegli posizione dove salvare user-data.json (anche iCloud)…'}
                 </button>
                 <button
                   type="button"
@@ -13262,7 +13369,7 @@ function App() {
                   onClick={handleUseICloudDataLocation}
                   style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
                 >
-                  ☁️ Salva e imposta su iCloud Drive
+                  {isIOSPlatform ? '☁️ Collega iCloud Drive' : '☁️ Salva e imposta su iCloud Drive'}
                 </button>
                 <button
                   type="button"
@@ -13275,11 +13382,39 @@ function App() {
                 <button
                   type="button"
                   className="pill"
+                  onClick={handleLinkPrimaryFile}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                  title="Collega un file user-data.json già presente (per esempio su iCloud Drive) per condividere gli stessi dati con Mac e iPhone"
+                >
+                  🔗 Collega file esistente (iCloud Drive)
+                </button>
+                <button
+                  type="button"
+                  className="pill"
+                  onClick={handleReloadPrimaryFile}
+                  style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                  title="Rilegge subito il file su iCloud Drive (utile dopo aver modificato i dati sull'altra piattaforma)"
+                >
+                  🔄 Ricarica da iCloud
+                </button>
+                <button
+                  type="button"
+                  className="pill"
                   onClick={handleOpenDataFolder}
                   style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
                 >
-                  📁 Mostra file nel Finder
+                  {isIOSPlatform ? '📁 Apri la cartella dati nell\'app File' : '📁 Mostra file nel Finder'}
                 </button>
+                {isIOSPlatform && dataFileInfo?.isCustomPrimary && (
+                  <button
+                    type="button"
+                    className="pill"
+                    onClick={handleUnlinkPrimaryFile}
+                    style={{ padding: '9px 16px', fontSize: '0.83rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                  >
+                    🔓 Scollega la cartella
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -13307,7 +13442,8 @@ function App() {
               onClick={handleExportUserDataJson}
               style={{ padding: '9px 16px', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
             >
-              💾 Esporta copia user-data.json
+              <Download size={16} aria-hidden="true" />
+              <span>Esporta copia user-data.json</span>
             </button>
             <button
               type="button"
@@ -13456,7 +13592,7 @@ function App() {
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     fontSize: '0.85rem',
-                    background: 'rgba(94, 234, 212, 0.03)',
+                    background: 'var(--accent-soft)',
                   }}
                 >
                   <span style={{ color: 'var(--muted)', fontWeight: 500 }}>Cassa Iniziale Totale (Somma):</span>
@@ -13481,7 +13617,8 @@ function App() {
             Scarica template Excel
           </button>
           <button className="pill" type="button" onClick={handleImportClick} title="Importa file Excel (.xlsx), Apple Numbers (.numbers), PDF o CSV">
-            📥 Importa dati (Excel, Numbers, PDF)
+            <Upload size={16} aria-hidden="true" />
+            <span>Importa dati (Excel, Numbers, PDF)</span>
           </button>
           <button className="pill" type="button" onClick={handleExportExcel}>
             Esporta Excel
@@ -13561,9 +13698,9 @@ function App() {
               style={{
                 padding: '10px 20px',
                 fontSize: '0.88rem',
-                background: '#e11d48',
-                borderColor: '#f43f5e',
-                color: '#ffffff',
+                background: 'var(--danger)',
+                borderColor: 'var(--danger)',
+                color: 'var(--on-solid)',
                 fontWeight: 700,
               }}
               autoFocus
@@ -13602,7 +13739,7 @@ function App() {
     if (bgEffect === 'none') return null;
 
     const isDark = theme === 'dark';
-    const borderStroke = isDark ? 'rgba(148, 163, 184, 0.22)' : 'rgba(100, 116, 139, 0.18)';
+    const borderStroke = isDark ? 'var(--border-strong)' : 'var(--border)';
 
     if (bgEffect === 'grid') {
       return (
@@ -13689,45 +13826,45 @@ function App() {
                 {/* Stella grande a scintillio (giallo oro) */}
                 <path
                   d="M 40 20 Q 40 40 20 40 Q 40 40 40 60 Q 40 40 60 40 Q 40 40 40 20 Z"
-                  fill="#fbbf24"
+                  fill="var(--warning)"
                   opacity="0.48"
                 />
                 
                 {/* Stella media a scintillio */}
                 <path
                   d="M 180 68 Q 180 80 168 80 Q 180 80 180 92 Q 180 80 192 80 Q 180 80 180 68 Z"
-                  fill="#fbbf24"
+                  fill="var(--warning)"
                   opacity="0.44"
                 />
 
                 {/* Stella media 2 a scintillio */}
                 <path
                   d="M 100 148 Q 100 160 88 160 Q 100 160 100 172 Q 100 160 112 160 Q 100 160 100 148 Z"
-                  fill="#f59e0b"
+                  fill="var(--warning)"
                   opacity="0.44"
                 />
 
                 {/* Stella piccola a scintillio */}
                 <path
                   d="M 210 182 Q 210 190 202 190 Q 210 190 210 198 Q 210 190 218 190 Q 210 190 210 182 Z"
-                  fill="#fbbf24"
+                  fill="var(--warning)"
                   opacity="0.4"
                 />
 
                 {/* Costellazione / Cerchietti lucenti dorati */}
-                <circle cx="120" cy="50" r="3.5" fill="#fbbf24" opacity="0.38" />
-                <circle cx="60" cy="200" r="2.8" fill="#eab308" opacity="0.34" />
-                <circle cx="150" cy="220" r="2.2" fill="#fbbf24" opacity="0.42" />
-                <circle cx="220" cy="30" r="1.8" fill="#fbbf24" opacity="0.3" />
+                <circle cx="120" cy="50" r="3.5" fill="var(--warning)" opacity="0.38" />
+                <circle cx="60" cy="200" r="2.8" fill="var(--warning)" opacity="0.34" />
+                <circle cx="150" cy="220" r="2.2" fill="var(--warning)" opacity="0.42" />
+                <circle cx="220" cy="30" r="1.8" fill="var(--warning)" opacity="0.3" />
 
                 {/* Saturno */}
                 <g transform="translate(145, 125) rotate(-18)">
                   {/* Retro dell'anello */}
-                  <ellipse cx="0" cy="0" rx="20" ry="5" fill="none" stroke="#f59e0b" strokeWidth="2" opacity="0.3" />
+                  <ellipse cx="0" cy="0" rx="20" ry="5" fill="none" stroke="var(--warning)" strokeWidth="2" opacity="0.3" />
                   {/* Corpo del pianeta */}
-                  <circle cx="0" cy="0" r="10" fill="#fbbf24" opacity="0.5" />
+                  <circle cx="0" cy="0" r="10" fill="var(--warning)" opacity="0.5" />
                   {/* Fronte dell'anello */}
-                  <path d="M -20 0 A 20 5 0 0 0 20 0" fill="none" stroke="#fbbf24" strokeWidth="2" opacity="0.5" />
+                  <path d="M -20 0 A 20 5 0 0 0 20 0" fill="none" stroke="var(--warning)" strokeWidth="2" opacity="0.5" />
                 </g>
               </pattern>
             </defs>
@@ -13745,6 +13882,7 @@ function App() {
       {renderBackgroundPattern()}
       <aside className="sidebar" style={{ zIndex: 1 }}>
         <div className="brand" style={{ position: 'relative' }}>
+          <img className="brand-mark" src={customLogo || 'icon.png'} alt="" aria-hidden="true" />
           <div style={{ flex: 1, minWidth: 0 }}>
             <p className="eyebrow">Registro budget</p>
             <h1>Cruscotto finanziario</h1>
@@ -13789,9 +13927,9 @@ function App() {
               justifyContent: 'space-between',
               padding: '10px 14px',
               borderRadius: '12px',
-              background: hideNumbers ? 'rgba(239, 68, 68, 0.14)' : 'var(--overlay-subtle, rgba(255,255,255,0.03))',
-              border: hideNumbers ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid var(--border)',
-              color: hideNumbers ? '#f87171' : 'var(--text)',
+              background: hideNumbers ? 'var(--danger-soft)' : 'var(--overlay-subtle)',
+              border: hideNumbers ? '1px solid var(--danger-border)' : '1px solid var(--border)',
+              color: hideNumbers ? 'var(--danger)' : 'var(--text)',
               cursor: 'pointer',
               fontSize: '0.82rem',
               fontWeight: 600,
@@ -13799,7 +13937,7 @@ function App() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {hideNumbers ? <EyeOff size={16} color="#f87171" /> : <Eye size={16} color="var(--muted)" />}
+              {hideNumbers ? <EyeOff size={16} color="var(--danger)" /> : <Eye size={16} color="var(--muted)" />}
               <span>{hideNumbers ? 'Cifre oscurate' : 'Oscura numeri'}</span>
             </div>
             <span
@@ -13808,8 +13946,8 @@ function App() {
                 padding: '2px 6px',
                 borderRadius: '6px',
                 fontWeight: 700,
-                background: hideNumbers ? 'rgba(239, 68, 68, 0.25)' : 'var(--overlay-medium)',
-                color: hideNumbers ? '#fca5a5' : 'var(--muted)',
+                background: hideNumbers ? 'var(--danger-soft)' : 'var(--overlay-medium)',
+                color: hideNumbers ? 'var(--danger-text)' : 'var(--muted)',
               }}
             >
               {hideNumbers ? 'ON' : 'OFF'}
@@ -13846,9 +13984,9 @@ function App() {
                 alignItems: 'center',
                 gap: '6px',
                 cursor: 'pointer',
-                background: hideNumbers ? 'rgba(239, 68, 68, 0.16)' : 'var(--input-bg, rgba(255,255,255,0.06))',
-                color: hideNumbers ? '#f87171' : 'var(--text, #e2e8f0)',
-                border: hideNumbers ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid var(--border, rgba(255,255,255,0.12))',
+                background: hideNumbers ? 'var(--danger-soft)' : 'var(--input-bg)',
+                color: hideNumbers ? 'var(--danger)' : 'var(--text)',
+                border: hideNumbers ? '1px solid var(--danger-border)' : '1px solid var(--border)',
                 fontWeight: 600,
                 fontSize: '0.82rem',
                 padding: '7px 14px',
@@ -13869,9 +14007,9 @@ function App() {
                 alignItems: 'center',
                 gap: '6px',
                 cursor: 'pointer',
-                background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(168, 85, 247, 0.12))',
-                color: '#c084fc',
-                border: '1px solid rgba(168, 85, 247, 0.35)',
+                background: 'linear-gradient(135deg, var(--accent-soft-strong), var(--accent-soft))',
+                color: 'var(--chart-3)',
+                border: '1px solid var(--chart-3)',
                 fontWeight: 600,
                 fontSize: '0.82rem',
                 padding: '7px 14px',
@@ -13884,16 +14022,19 @@ function App() {
             </button>
             {activeSection === 'dashboard' && (
               <button className="pill pill-primary" type="button" onClick={handleImportClick} title="Importa file Excel (.xlsx), Apple Numbers (.numbers), PDF estratti conto o CSV">
-                📥 Importa dati
+                <Upload size={16} aria-hidden="true" />
+                <span>Importa dati</span>
               </button>
             )}
             {activeSection === 'impostazioni' && (
               <>
                 <button className="pill" type="button" onClick={handleImportUserDataJsonClick} title="Importa il file user-data.json salvato per ripristinare all'istante l'intera applicazione">
-                  📥 Importa user-data.json
+                  <Upload size={16} aria-hidden="true" />
+                  <span>Importa user-data.json</span>
                 </button>
                 <button className="pill" type="button" onClick={handleExportUserDataJson} title="Scarica una copia completa di backup di tutti i dati registrati">
-                  💾 Salva user-data.json
+                  <Save size={16} aria-hidden="true" />
+                  <span>Salva user-data.json</span>
                 </button>
                 <button className="pill" type="button" onClick={handleImportClick} title="Importa file Excel (.xlsx), Apple Numbers (.numbers), PDF estratti conto o CSV">
                   Importa Excel/PDF
@@ -13908,6 +14049,15 @@ function App() {
                 <button className="pill" type="button" onClick={handleImportClick} title="Importa movimenti da file Excel, Numbers, PDF bancari o CSV">
                   📥 Importa file
                 </button>
+                <button
+                  className="pill"
+                  type="button"
+                  onClick={() => setShowReceiptModal(true)}
+                  title="Scansiona uno scontrino: l'app riconosce esercente, data e totale e precompila la transazione"
+                >
+                  <ScanLine size={16} aria-hidden="true" />
+                  <span>Scansiona scontrino</span>
+                </button>
                 <button className="pill pill-primary" type="button" onClick={startNewTransaction}>
                   Nuova transazione
                 </button>
@@ -13919,8 +14069,8 @@ function App() {
         <section className="status-banner" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
           <span className="status-badge">Azioni</span>
           <p style={{ flex: 1, minWidth: '180px' }}>{statusMessage}</p>
-          <div className="autosave-indicator" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: '#10b981', fontWeight: 500 }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }}></span>
+          <div className="autosave-indicator" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--success)', fontWeight: 500 }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--success)', display: 'inline-block' }}></span>
             <span>Autosalvataggio attivo (v{APP_VERSION})</span>
           </div>
         </section>
@@ -13945,6 +14095,13 @@ function App() {
           onClose={() => setShowImportModal(false)}
           onConfirmImport={handleConfirmImportData}
           existingAccounts={uniqueAccounts}
+        />
+        <ReceiptScanModal
+          isOpen={showReceiptModal}
+          onClose={() => setShowReceiptModal(false)}
+          onConfirm={handleConfirmReceipt}
+          accountOptions={uniqueAccounts}
+          categoryOptions={categoryOptions}
         />
         {renderConfirmModal()}
         <UpdateModal
@@ -13975,21 +14132,19 @@ function App() {
               zIndex: 100000,
               width: '380px',
               maxWidth: 'calc(100vw - 48px)',
-              background: theme === 'light' ? '#ffffff' : 'rgba(15, 23, 42, 0.95)',
+              background: 'var(--panel-strong)',
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
-              border: theme === 'light' ? '1px solid rgba(148, 163, 184, 0.35)' : '1px solid rgba(148, 163, 184, 0.25)',
+              border: '1px solid var(--border-strong)',
               borderRadius: '16px',
-              boxShadow: theme === 'light'
-                ? '0 20px 40px -10px rgba(15, 23, 42, 0.2), 0 0 0 1px rgba(148, 163, 184, 0.15)'
-                : '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1)',
+              boxShadow: 'var(--shadow-lg), 0 0 0 1px var(--border)',
               padding: '14px 16px',
               display: 'flex',
               alignItems: 'flex-start',
               gap: '12px',
               animation: 'slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
               cursor: 'pointer',
-              color: theme === 'light' ? '#0f172a' : '#f8fafc',
+              color: 'var(--text)',
             }}
             onClick={() => {
               setShowNotificationModal(true);
@@ -14002,30 +14157,30 @@ function App() {
                 width: '38px',
                 height: '38px',
                 borderRadius: '10px',
-                background: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+                background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: '#ffffff',
+                color: 'var(--on-solid)',
                 flexShrink: 0,
-                boxShadow: '0 4px 10px rgba(14, 165, 233, 0.3)',
+                boxShadow: '0 4px 10px var(--info-border)',
               }}
             >
               <Bell size={20} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: theme === 'light' ? '#0284c7' : '#38bdf8' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--info)' }}>
                   Registro Budget
                 </span>
-                <span style={{ fontSize: '0.7rem', color: theme === 'light' ? '#64748b' : '#94a3b8' }}>
+                <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
                   Adesso
                 </span>
               </div>
-              <div style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '3px', color: theme === 'light' ? '#0f172a' : '#f8fafc' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.88rem', lineHeight: 1.3, marginBottom: '3px', color: 'var(--text)' }}>
                 {activeToast.title}
               </div>
-              <div style={{ fontSize: '0.78rem', lineHeight: 1.4, color: theme === 'light' ? '#475569' : '#cbd5e1' }}>
+              <div style={{ fontSize: '0.78rem', lineHeight: 1.4, color: 'var(--muted)' }}>
                 {activeToast.body}
               </div>
             </div>
@@ -14039,7 +14194,7 @@ function App() {
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: theme === 'light' ? '#64748b' : '#94a3b8',
+                color: 'var(--muted)',
                 cursor: 'pointer',
                 padding: '4px',
                 borderRadius: '6px',

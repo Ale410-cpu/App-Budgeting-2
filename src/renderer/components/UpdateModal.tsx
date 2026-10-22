@@ -44,7 +44,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(3, 7, 18, 0.78)',
+        backgroundColor: 'var(--scrim)',
         backdropFilter: 'blur(8px)',
         zIndex: 10000,
         display: 'flex',
@@ -56,17 +56,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     >
       <div
         style={{
-          background: 'var(--panel-strong, #0f172a)',
-          border: '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+          background: 'var(--panel-strong)',
+          border: '1px solid var(--border)',
           borderRadius: '24px',
           padding: '28px',
           width: '100%',
           maxWidth: '560px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+          boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',
-          color: 'var(--text, #f8fafc)',
+          color: 'var(--text)',
         }}
         role="dialog"
         aria-modal="true"
@@ -79,12 +79,12 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
               width: '48px',
               height: '48px',
               borderRadius: '16px',
-              background: 'linear-gradient(135deg, #0ea5e9, #38bdf8)',
+              background: 'var(--info)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '1.6rem',
-              boxShadow: '0 8px 16px -4px rgba(14, 165, 233, 0.4)',
+              boxShadow: 'var(--shadow-accent)',
               flexShrink: 0,
             }}
           >
@@ -98,7 +98,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   textTransform: 'uppercase',
                   letterSpacing: '0.08em',
                   fontWeight: 700,
-                  color: '#38bdf8',
+                  color: 'var(--info)',
                 }}
               >
                 Aggiornamento Disponibile
@@ -108,8 +108,8 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   fontSize: '0.72rem',
                   padding: '2px 8px',
                   borderRadius: '100px',
-                  background: 'rgba(56, 189, 248, 0.15)',
-                  color: '#38bdf8',
+                  background: 'var(--info-soft)',
+                  color: 'var(--info)',
                   fontWeight: 600,
                 }}
               >
@@ -122,7 +122,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 fontSize: '1.35rem',
                 fontWeight: 700,
                 margin: '4px 0 0',
-                color: 'var(--text, #f8fafc)',
+                color: 'var(--text)',
                 lineHeight: 1.25,
               }}
             >
@@ -135,11 +135,11 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 gap: '8px',
                 marginTop: '6px',
                 fontSize: '0.85rem',
-                color: 'var(--muted, #94a3b8)',
+                color: 'var(--muted)',
               }}
             >
               <span style={{ textDecoration: 'line-through', opacity: 0.85 }}>{currentVer}</span>
-              <span style={{ color: '#38bdf8', fontWeight: 700 }}>➔ {newVer}</span>
+              <span style={{ color: 'var(--info)', fontWeight: 700 }}>➔ {newVer}</span>
               {updateInfo.publishedAt && (
                 <span style={{ opacity: 0.6 }}>
                   • {new Date(updateInfo.publishedAt).toLocaleDateString('it-IT')}
@@ -154,22 +154,22 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
           <>
             <div
               style={{
-                background: 'var(--overlay-subtle, rgba(255, 255, 255, 0.03))',
-                border: '1px solid var(--border, rgba(148, 163, 184, 0.15))',
+                background: 'var(--overlay-subtle)',
+                border: '1px solid var(--border)',
                 borderRadius: '16px',
                 padding: '16px',
                 maxHeight: '180px',
                 overflowY: 'auto',
                 fontSize: '0.85rem',
                 lineHeight: 1.55,
-                color: 'var(--text, #cbd5e1)',
+                color: 'var(--text)',
               }}
             >
               <p
                 style={{
                   margin: '0 0 8px',
                   fontWeight: 600,
-                  color: 'var(--accent, #38bdf8)',
+                  color: 'var(--accent)',
                   fontSize: '0.8rem',
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
@@ -190,8 +190,8 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   justifyContent: 'space-between',
                   padding: '10px 14px',
                   borderRadius: '12px',
-                  background: 'rgba(56, 189, 248, 0.06)',
-                  border: '1px solid rgba(56, 189, 248, 0.2)',
+                  background: 'var(--info-soft)',
+                  border: '1px solid var(--info-border)',
                   fontSize: '0.82rem',
                 }}
               >
@@ -200,7 +200,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   <span
                     style={{
                       fontFamily: 'monospace',
-                      color: 'var(--text, #f1f5f9)',
+                      color: 'var(--text)',
                       fontWeight: 600,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -211,7 +211,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                     {asset.name}
                   </span>
                 </div>
-                <span style={{ color: 'var(--muted, #94a3b8)', fontWeight: 600, flexShrink: 0 }}>
+                <span style={{ color: 'var(--muted)', fontWeight: 600, flexShrink: 0 }}>
                   {formatBytes(asset.size)}
                 </span>
               </div>
@@ -219,12 +219,12 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
 
             <div
               style={{
-                background: 'rgba(16, 185, 129, 0.08)',
-                border: '1px solid rgba(16, 185, 129, 0.25)',
+                background: 'var(--success-soft)',
+                border: '1px solid var(--success-border)',
                 borderRadius: '12px',
                 padding: '12px 14px',
                 fontSize: '0.82rem',
-                color: '#34d399',
+                color: 'var(--success)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
@@ -237,7 +237,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
               </span>
             </div>
 
-            <p style={{ margin: '0', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text, #f8fafc)' }}>
+            <p style={{ margin: '0', fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>
               Vuoi scaricare e installare questo aggiornamento adesso?
             </p>
           </>
@@ -247,10 +247,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         {status === 'downloading' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '10px 0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text, #f8fafc)' }}>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text)' }}>
                 Download dell'aggiornamento in corso...
               </span>
-              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#38bdf8' }}>
+              <span style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--info)' }}>
                 {progress.percent || 0}%
               </span>
             </div>
@@ -261,7 +261,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 width: '100%',
                 height: '10px',
                 borderRadius: '100px',
-                background: 'var(--input-bg, rgba(255, 255, 255, 0.08))',
+                background: 'var(--input-bg)',
                 overflow: 'hidden',
                 position: 'relative',
               }}
@@ -270,10 +270,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 style={{
                   width: `${Math.min(100, Math.max(0, progress.percent || 0))}%`,
                   height: '100%',
-                  background: 'linear-gradient(90deg, #0ea5e9, #38bdf8)',
+                  background: 'var(--info)',
                   borderRadius: '100px',
                   transition: 'width 0.2s ease',
-                  boxShadow: '0 0 12px rgba(56, 189, 248, 0.6)',
+                  boxShadow: 'var(--shadow-accent)',
                 }}
               />
             </div>
@@ -283,14 +283,14 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 display: 'flex',
                 justifyContent: 'space-between',
                 fontSize: '0.78rem',
-                color: 'var(--muted, #94a3b8)',
+                color: 'var(--muted)',
               }}
             >
               <span>{formatBytes(progress.transferred)} scaricati</span>
               <span>{formatBytes(progress.total || asset?.size)} totali</span>
             </div>
 
-            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted, #94a3b8)', textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--muted)', textAlign: 'center' }}>
               Non chiudere l'applicazione. L'installatore verrà avviato non appena il download sarà
               completato.
             </p>
@@ -301,10 +301,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         {status === 'installing' && (
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>⚙️</div>
-            <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', color: 'var(--text, #f8fafc)' }}>
+            <h4 style={{ margin: '0 0 6px', fontSize: '1.1rem', color: 'var(--text)' }}>
               Sostituzione automatica dell'applicazione in corso...
             </h4>
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted, #94a3b8)', lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted)', lineHeight: 1.5 }}>
               Estrazione del pacchetto, aggiornamento nella cartella Applicazioni e rimozione blocchi Gatekeeper. L'app si riavvierà da sola tra pochi secondi.
             </p>
           </div>
@@ -314,10 +314,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         {status === 'completed' && (
           <div style={{ textAlign: 'center', padding: '14px 0' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🎉</div>
-            <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem', color: '#10b981' }}>
+            <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem', color: 'var(--success)' }}>
               Aggiornamento installato con successo!
             </h4>
-            <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: 'var(--text, #cbd5e1)', lineHeight: 1.5 }}>
+            <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.5 }}>
               {successMessage ||
                 'La nuova versione è stata installata al posto della precedente e si sta riavviando automaticamente.'}
             </p>
@@ -328,12 +328,12 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         {status === 'error' && (
           <div
             style={{
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
+              background: 'var(--danger-soft)',
+              border: '1px solid var(--danger-border)',
               borderRadius: '14px',
               padding: '14px',
               fontSize: '0.85rem',
-              color: '#f87171',
+              color: 'var(--danger)',
             }}
           >
             <p style={{ margin: '0 0 6px', fontWeight: 700 }}>⚠️ Si è verificato un errore:</p>
@@ -374,7 +374,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   style={{
                     padding: '9px 14px',
                     fontSize: '0.82rem',
-                    color: 'var(--muted, #94a3b8)',
+                    color: 'var(--muted)',
                     cursor: 'pointer',
                   }}
                   title="Non notificare più per questa specifica versione"
@@ -392,9 +392,9 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   fontSize: '0.88rem',
                   fontWeight: 700,
                   cursor: 'pointer',
-                  background: 'linear-gradient(135deg, #0ea5e9, #0284c7)',
-                  color: '#ffffff',
-                  boxShadow: '0 4px 12px rgba(14, 165, 233, 0.35)',
+                  background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
+                  color: 'var(--on-solid)',
+                  boxShadow: 'var(--shadow-accent)',
                 }}
               >
                 Installa ora ✨

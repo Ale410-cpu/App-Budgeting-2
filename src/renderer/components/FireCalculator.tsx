@@ -125,7 +125,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
         {showFireGuide && (
           <div style={{
             background: 'var(--overlay-subtle)',
-            border: '1px solid rgba(94, 234, 212, 0.25)',
+            border: '1px solid var(--accent-border)',
             borderRadius: '16px',
             padding: '16px 20px',
             marginBottom: '20px',
@@ -149,19 +149,19 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '12px', fontSize: '0.78rem', color: 'var(--text)' }}>
               <div style={{ background: 'var(--panel-card-bg)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                <strong style={{ color: '#10b981', display: 'block', marginBottom: '4px' }}>🎯 Patrimonio Finale</strong>
+                <strong style={{ color: 'var(--success)', display: 'block', marginBottom: '4px' }}>🎯 Patrimonio Finale</strong>
                 <span>Il valore totale del portafoglio all'anno <strong>{years}</strong>. È dato dalla somma del capitale che versi tu più tutti gli interessi composti reinvestiti nel tempo.</span>
               </div>
               <div style={{ background: 'var(--panel-card-bg)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '4px' }}>🛡️ Rendita Mensile (Regola 4%)</strong>
+                <strong style={{ color: 'var(--info)', display: 'block', marginBottom: '4px' }}>🛡️ Rendita Mensile (Regola 4%)</strong>
                 <span>Lo "stipendio passivo" che puoi prelevare ogni mese per sempre senza intaccare il capitale. Basato sul <em>Trinity Study</em>: prelevare fino al 4% all'anno mantiene il capitale intatto nel tempo.</span>
               </div>
               <div style={{ background: 'var(--panel-card-bg)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                <strong style={{ color: '#c084fc', display: 'block', marginBottom: '4px' }}>🏁 Capitale FIRE (25× spese)</strong>
+                <strong style={{ color: 'var(--chart-3)', display: 'block', marginBottom: '4px' }}>🏁 Capitale FIRE (25× spese)</strong>
                 <span>La somma totale che ti serve per smettere di lavorare. Si calcola moltiplicando le tue spese annuali per 25 (es. {formatEuro(targetMonthlyExpense * 12)} × 25 = {formatEuro(simulation.fireNumber)}).</span>
               </div>
               <div style={{ background: 'var(--panel-card-bg)', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)' }}>
-                <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '4px' }}>⏳ Tempo a FIRE</strong>
+                <strong style={{ color: 'var(--warning)', display: 'block', marginBottom: '4px' }}>⏳ Tempo a FIRE</strong>
                 <span>Gli anni che ti separano dal Capitale FIRE continuando a risparmiare regolarmente {formatEuro(monthlyContribution)}/mese con il rendimento ipotizzato ({expectedReturnRate}%).</span>
               </div>
             </div>
@@ -215,7 +215,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600 }}>Rendimento Annuo Stimato</span>
-              <strong style={{ fontSize: '0.75rem', color: '#10b981' }}>{expectedReturnRate}%</strong>
+              <strong style={{ fontSize: '0.75rem', color: 'var(--success)' }}>{expectedReturnRate}%</strong>
             </div>
             <input
               type="range"
@@ -224,7 +224,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               step="0.5"
               value={expectedReturnRate}
               onChange={(e) => setExpectedReturnRate(parseFloat(e.target.value))}
-              style={{ accentColor: '#10b981' }}
+              style={{ accentColor: 'var(--success)' }}
             />
             <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>La media storica azionaria globale è ~7-8% annuo.</span>
           </label>
@@ -232,7 +232,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
           <label style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600 }}>Orizzonte Temporale</span>
-              <strong style={{ fontSize: '0.75rem', color: '#38bdf8' }}>{years} anni</strong>
+              <strong style={{ fontSize: '0.75rem', color: 'var(--info)' }}>{years} anni</strong>
             </div>
             <input
               type="range"
@@ -241,7 +241,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               step="1"
               value={years}
               onChange={(e) => setYears(parseInt(e.target.value, 10))}
-              style={{ accentColor: '#38bdf8' }}
+              style={{ accentColor: 'var(--info)' }}
             />
             <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Durata in anni dell'accumulo del capitale.</span>
           </label>
@@ -283,7 +283,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             borderRadius: '14px',
             background: 'var(--panel-card-bg)',
             border: '1px solid var(--border)',
-            borderLeft: '4px solid #10b981',
+            borderLeft: '4px solid var(--success)',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -292,7 +292,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Patrimonio Finale Stimato
               </span>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#10b981', marginTop: '4px', lineHeight: 1.2 }}>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--success)', marginTop: '4px', lineHeight: 1.2 }}>
                 {formatEuro(simulation.finalTotal)}
               </div>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>accumulato tra {years} anni</span>
@@ -308,7 +308,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             borderRadius: '14px',
             background: 'var(--panel-card-bg)',
             border: '1px solid var(--border)',
-            borderLeft: '4px solid #38bdf8',
+            borderLeft: '4px solid var(--info)',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -317,7 +317,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Rendita Mensile Sostenibile
               </span>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#38bdf8', marginTop: '4px', lineHeight: 1.2 }}>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--info)', marginTop: '4px', lineHeight: 1.2 }}>
                 {formatEuro(simulation.monthlyPassiveIncome)}<span style={{ fontSize: '0.85rem', fontWeight: 600 }}>/mese</span>
               </div>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>prelievo sicuro del 4% annuo</span>
@@ -333,7 +333,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             borderRadius: '14px',
             background: 'var(--panel-card-bg)',
             border: '1px solid var(--border)',
-            borderLeft: '4px solid #c084fc',
+            borderLeft: '4px solid var(--chart-3)',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -342,7 +342,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Capitale FIRE Necessario
               </span>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#c084fc', marginTop: '4px', lineHeight: 1.2 }}>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--chart-3)', marginTop: '4px', lineHeight: 1.2 }}>
                 {formatEuro(simulation.fireNumber)}
               </div>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>per coprire {formatEuro(targetMonthlyExpense)}/mese</span>
@@ -358,7 +358,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             borderRadius: '14px',
             background: 'var(--panel-card-bg)',
             border: '1px solid var(--border)',
-            borderLeft: '4px solid #f59e0b',
+            borderLeft: '4px solid var(--warning)',
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between'
@@ -367,7 +367,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
               <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                 Tempo a Indipendenza (FIRE)
               </span>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#f59e0b', marginTop: '4px', lineHeight: 1.2 }}>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--warning)', marginTop: '4px', lineHeight: 1.2 }}>
                 {simulation.yearsToFire} {typeof simulation.yearsToFire === 'number' ? (simulation.yearsToFire === 1 ? 'anno' : 'anni') : ''}
               </div>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>con l'attuale ritmo di risparmio</span>
@@ -389,16 +389,16 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', fontSize: '0.76rem', color: 'var(--muted)', marginBottom: '8px' }}>
             <span>
-              💰 <strong>Capitale Versato da te:</strong> <span style={{ color: '#38bdf8', fontWeight: 700 }}>{formatEuro(simulation.finalContributed)}</span> ({((simulation.finalContributed / simulation.finalTotal) * 100).toFixed(0)}%)
+              💰 <strong>Capitale Versato da te:</strong> <span style={{ color: 'var(--info)', fontWeight: 700 }}>{formatEuro(simulation.finalContributed)}</span> ({((simulation.finalContributed / simulation.finalTotal) * 100).toFixed(0)}%)
             </span>
             <span>
-              📈 <strong>Interessi Composti Generati:</strong> <span style={{ color: '#10b981', fontWeight: 700 }}>+{formatEuro(simulation.finalInterest)}</span> ({((simulation.finalInterest / simulation.finalTotal) * 100).toFixed(0)}%)
+              📈 <strong>Interessi Composti Generati:</strong> <span style={{ color: 'var(--success)', fontWeight: 700 }}>+{formatEuro(simulation.finalInterest)}</span> ({((simulation.finalInterest / simulation.finalTotal) * 100).toFixed(0)}%)
             </span>
           </div>
           
           <div style={{ height: '14px', borderRadius: '7px', background: 'var(--overlay-medium)', display: 'flex', overflow: 'hidden', marginBottom: '8px' }}>
-            <div style={{ width: `${(simulation.finalContributed / simulation.finalTotal) * 100}%`, background: '#38bdf8' }} title={`Versato: ${formatEuro(simulation.finalContributed)}`} />
-            <div style={{ width: `${(simulation.finalInterest / simulation.finalTotal) * 100}%`, background: '#10b981' }} title={`Interessi: ${formatEuro(simulation.finalInterest)}`} />
+            <div style={{ width: `${(simulation.finalContributed / simulation.finalTotal) * 100}%`, background: 'var(--chart-2)' }} title={`Versato: ${formatEuro(simulation.finalContributed)}`} />
+            <div style={{ width: `${(simulation.finalInterest / simulation.finalTotal) * 100}%`, background: 'var(--chart-positive)' }} title={`Interessi: ${formatEuro(simulation.finalInterest)}`} />
           </div>
 
           <p style={{ margin: 0, fontSize: '0.73rem', color: 'var(--muted)' }}>
@@ -411,15 +411,15 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', padding: '0 8px', fontSize: '0.75rem' }}>
             <span style={{ fontWeight: 600, color: 'var(--text)' }}>Evoluzione Temporale del Capitale</span>
             <div style={{ display: 'flex', gap: '14px' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#38bdf8' }}>
-                <span style={{ width: '12px', height: '2px', background: '#38bdf8', display: 'inline-block' }} /> Capitale versato
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--chart-2)' }}>
+                <span style={{ width: '12px', height: '2px', background: 'var(--chart-2)', display: 'inline-block' }} /> Capitale versato
               </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#10b981' }}>
-                <span style={{ width: '12px', height: '3px', background: '#10b981', display: 'inline-block' }} /> Capitale totale (+interessi)
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--chart-positive)' }}>
+                <span style={{ width: '12px', height: '3px', background: 'var(--chart-positive)', display: 'inline-block' }} /> Capitale totale (+interessi)
               </span>
               {simulation.fireNumber <= maxVal && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: '#c084fc' }}>
-                  <span style={{ width: '12px', height: '2px', borderTop: '2px dashed #c084fc', display: 'inline-block' }} /> Traguardo FIRE
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', color: 'var(--chart-3)' }}>
+                  <span style={{ width: '12px', height: '2px', borderTop: '2px dashed var(--chart-3)', display: 'inline-block' }} /> Traguardo FIRE
                 </span>
               )}
             </div>
@@ -453,11 +453,11 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
                   y1={getY(simulation.fireNumber)}
                   x2={svgWidth - paddingX}
                   y2={getY(simulation.fireNumber)}
-                  stroke="#c084fc"
+                  stroke="var(--chart-3)"
                   strokeWidth={1.5}
                   strokeDasharray="5 3"
                 />
-                <text x={svgWidth - paddingX - 4} y={getY(simulation.fireNumber) - 4} textAnchor="end" fontSize="0.65rem" fill="#c084fc" fontWeight={700}>
+                <text x={svgWidth - paddingX - 4} y={getY(simulation.fireNumber) - 4} textAnchor="end" fontSize="0.65rem" fill="var(--chart-3)" fontWeight={700}>
                   Target FIRE ({formatEuro(simulation.fireNumber)})
                 </text>
               </g>
@@ -468,7 +468,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             <path
               d={simulation.yearlyData.map((d, idx) => `${idx === 0 ? 'M' : 'L'} ${getX(idx)} ${getY(d.contributed)}`).join(' ')}
               fill="none"
-              stroke="#38bdf8"
+              stroke="var(--chart-2)"
               strokeWidth={2}
               strokeDasharray="4 2"
             />
@@ -477,14 +477,14 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             <path
               d={simulation.yearlyData.map((d, idx) => `${idx === 0 ? 'M' : 'L'} ${getX(idx)} ${getY(d.total)}`).join(' ')}
               fill="none"
-              stroke="#10b981"
+              stroke="var(--chart-positive)"
               strokeWidth={2.8}
             />
 
             {/* Dots */}
             {simulation.yearlyData.map((d, idx) => (
               <g key={`fdot-${idx}`}>
-                <circle cx={getX(idx)} cy={getY(d.total)} r={3.5} fill="#10b981" />
+                <circle cx={getX(idx)} cy={getY(d.total)} r={3.5} fill="var(--chart-positive)" />
                 {(idx === 0 || idx === Math.floor(simulation.yearlyData.length / 2) || idx === simulation.yearlyData.length - 1) && (
                   <text x={getX(idx)} y={svgHeight - 10} textAnchor="middle" fontSize="0.68rem" fill="var(--muted)">
                     Anno {d.year}

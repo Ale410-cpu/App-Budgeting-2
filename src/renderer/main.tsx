@@ -1,6 +1,7 @@
 import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import './fonts.css';
 import './styles.css';
 import { initPrototypePollutionDefense } from './utils/security';
 
@@ -49,9 +50,9 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            backgroundColor: '#08111f',
-            color: '#f8fafc',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            backgroundColor: 'var(--bg)',
+            color: 'var(--text)',
+            fontFamily: 'var(--font-sans)',
             padding: '24px',
           }}
         >
@@ -59,11 +60,11 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             style={{
               maxWidth: '560px',
               width: '100%',
-              backgroundColor: '#0f172a',
-              border: '1px solid rgba(148, 163, 184, 0.2)',
-              borderRadius: '16px',
+              backgroundColor: 'var(--panel-strong)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-lg)',
               padding: '32px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.5)',
+              boxShadow: 'var(--shadow-lg)',
               textAlign: 'center',
             }}
           >
@@ -72,8 +73,8 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                 width: '56px',
                 height: '56px',
                 borderRadius: '50%',
-                backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                color: '#ef4444',
+                backgroundColor: 'var(--danger-soft)',
+                color: 'var(--danger)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -86,21 +87,22 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '8px' }}>
               Ripristino Registro Budget
             </h2>
-            <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '20px', lineHeight: 1.5 }}>
+            <p style={{ color: 'var(--muted)', fontSize: '0.9rem', marginBottom: '20px', lineHeight: 1.5 }}>
               Si è verificato un errore durante il rendering della schermata. I tuoi dati su disco sono al sicuro.
             </p>
             {this.state.error?.message && (
               <pre
                 style={{
-                  backgroundColor: '#020617',
+                  backgroundColor: 'var(--bg)',
                   padding: '12px',
-                  borderRadius: '8px',
+                  borderRadius: 'var(--radius-sm)',
                   fontSize: '0.78rem',
-                  color: '#f87171',
+                  color: 'var(--danger)',
                   textAlign: 'left',
                   overflowX: 'auto',
                   marginBottom: '20px',
-                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  border: '1px solid var(--danger-border)',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {this.state.error.message}
@@ -112,9 +114,9 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                 onClick={this.handleReload}
                 style={{
                   padding: '10px 20px',
-                  borderRadius: '10px',
-                  backgroundColor: '#0ea5e9',
-                  color: '#ffffff',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--accent)',
+                  color: 'var(--pill-primary-text)',
                   fontWeight: 600,
                   fontSize: '0.9rem',
                   border: 'none',
@@ -128,12 +130,12 @@ class RootErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                 onClick={this.handleResetData}
                 style={{
                   padding: '10px 20px',
-                  borderRadius: '10px',
-                  backgroundColor: '#1e293b',
-                  color: '#cbd5e1',
+                  borderRadius: 'var(--radius-sm)',
+                  backgroundColor: 'var(--panel-card-bg)',
+                  color: 'var(--text)',
                   fontWeight: 600,
                   fontSize: '0.9rem',
-                  border: '1px solid rgba(148, 163, 184, 0.2)',
+                  border: '1px solid var(--border)',
                   cursor: 'pointer',
                 }}
               >

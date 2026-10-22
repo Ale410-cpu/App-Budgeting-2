@@ -142,7 +142,7 @@ export const ReimbursementSchedulePanel: React.FC<ReimbursementSchedulePanelProp
   };
 
   return (
-    <article className="panel large-panel" style={{ margin: 0, border: '1px solid var(--accent)', boxShadow: '0 8px 32px rgba(0,0,0,0.25)' }}>
+    <article className="panel large-panel" style={{ margin: 0, border: '1px solid var(--accent)', boxShadow: 'var(--shadow-lg)' }}>
       {/* Header */}
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
@@ -169,23 +169,23 @@ export const ReimbursementSchedulePanel: React.FC<ReimbursementSchedulePanelProp
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
         <div style={{ padding: '12px', borderRadius: '10px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
           <span style={{ fontSize: '0.72rem', color: 'var(--muted)', fontWeight: 600 }}>Totale da Incassare</span>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#38bdf8', marginTop: '2px' }}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--info)', marginTop: '2px' }}>
             {formatEuro(stats.totalPending)}
           </div>
           <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Crediti verso terzi</span>
         </div>
 
-        <div style={{ padding: '12px', borderRadius: '10px', background: stats.overdueCount > 0 ? 'rgba(239, 68, 68, 0.12)' : 'var(--panel-card-bg)', border: stats.overdueCount > 0 ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid var(--border)' }}>
-          <span style={{ fontSize: '0.72rem', color: stats.overdueCount > 0 ? '#f87171' : 'var(--muted)', fontWeight: 600 }}>In Ritardo (Scaduti)</span>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: stats.overdueCount > 0 ? '#f87171' : 'var(--text)', marginTop: '2px' }}>
+        <div style={{ padding: '12px', borderRadius: '10px', background: stats.overdueCount > 0 ? 'var(--danger-soft)' : 'var(--panel-card-bg)', border: stats.overdueCount > 0 ? '1px solid var(--danger-border)' : '1px solid var(--border)' }}>
+          <span style={{ fontSize: '0.72rem', color: stats.overdueCount > 0 ? 'var(--danger)' : 'var(--muted)', fontWeight: 600 }}>In Ritardo (Scaduti)</span>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: stats.overdueCount > 0 ? 'var(--danger)' : 'var(--text)', marginTop: '2px' }}>
             {stats.overdueCount}
           </div>
           <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Oltre la data concordata</span>
         </div>
 
-        <div style={{ padding: '12px', borderRadius: '10px', background: stats.dueSoonCount > 0 ? 'rgba(245, 158, 11, 0.12)' : 'var(--panel-card-bg)', border: stats.dueSoonCount > 0 ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid var(--border)' }}>
-          <span style={{ fontSize: '0.72rem', color: stats.dueSoonCount > 0 ? '#f59e0b' : 'var(--muted)', fontWeight: 600 }}>In Scadenza (Prossimi 7 gg)</span>
-          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: stats.dueSoonCount > 0 ? '#f59e0b' : 'var(--text)', marginTop: '2px' }}>
+        <div style={{ padding: '12px', borderRadius: '10px', background: stats.dueSoonCount > 0 ? 'var(--warning-soft)' : 'var(--panel-card-bg)', border: stats.dueSoonCount > 0 ? '1px solid var(--warning-border)' : '1px solid var(--border)' }}>
+          <span style={{ fontSize: '0.72rem', color: stats.dueSoonCount > 0 ? 'var(--warning)' : 'var(--muted)', fontWeight: 600 }}>In Scadenza (Prossimi 7 gg)</span>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: stats.dueSoonCount > 0 ? 'var(--warning)' : 'var(--text)', marginTop: '2px' }}>
             {stats.dueSoonCount}
           </div>
           <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Da incassare a breve</span>
@@ -280,11 +280,11 @@ export const ReimbursementSchedulePanel: React.FC<ReimbursementSchedulePanelProp
                   </td>
                   <td>
                     {item.isOverdue ? (
-                      <span style={{ color: '#f87171', fontWeight: 650, fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--danger)', fontWeight: 650, fontSize: '0.75rem' }}>
                         ⚠️ Scaduto da {Math.abs(item.daysUntilDue!)} gg
                       </span>
                     ) : item.isDueSoon ? (
-                      <span style={{ color: '#f59e0b', fontWeight: 650, fontSize: '0.75rem' }}>
+                      <span style={{ color: 'var(--warning)', fontWeight: 650, fontSize: '0.75rem' }}>
                         ⏳ Scade tra {item.daysUntilDue} gg
                       </span>
                     ) : item.daysUntilDue !== null ? (
@@ -299,11 +299,11 @@ export const ReimbursementSchedulePanel: React.FC<ReimbursementSchedulePanelProp
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                      <strong style={{ color: '#38bdf8', fontSize: '0.92rem', fontFamily: 'var(--font-mono)' }}>
+                      <strong style={{ color: 'var(--info)', fontSize: '0.92rem', fontFamily: 'var(--font-mono)' }}>
                         {formatEuro(item.remainingAmount)}
                       </strong>
                       {item.alreadyReimbursed > 0 && (
-                        <span style={{ fontSize: '0.68rem', color: '#10b981' }}>
+                        <span style={{ fontSize: '0.68rem', color: 'var(--success)' }}>
                           incassati {formatEuro(item.alreadyReimbursed)}
                         </span>
                       )}

@@ -364,7 +364,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
           {/* KPI 2: Media Mensile */}
           <div style={{ padding: '14px', borderRadius: '12px', background: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.74rem', color: 'var(--muted)', fontWeight: 600 }}>Media Mensile</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#38bdf8', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--info)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
               {formatEuro(trendData.avgMonthly)}
             </div>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
@@ -383,7 +383,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                   fontSize: '1.25rem',
                   fontWeight: 700,
                   fontFamily: 'var(--font-mono)',
-                  color: trendData.latestMonth.momDiffVal > 0 ? '#fb7185' : trendData.latestMonth.momDiffVal < 0 ? '#10b981' : 'var(--text)',
+                  color: trendData.latestMonth.momDiffVal > 0 ? 'var(--danger)' : trendData.latestMonth.momDiffVal < 0 ? 'var(--success)' : 'var(--text)',
                 }}
               >
                 {trendData.latestMonth.momDiffVal > 0 ? `+${trendData.latestMonth.momDiffPct.toFixed(1)}%` : `${trendData.latestMonth.momDiffPct.toFixed(1)}%`}
@@ -392,7 +392,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                 ({trendData.latestMonth.momDiffVal >= 0 ? `+${formatEuro(trendData.latestMonth.momDiffVal)}` : formatEuro(trendData.latestMonth.momDiffVal)})
               </span>
             </div>
-            <span style={{ fontSize: '0.7rem', color: trendData.latestMonth.momDiffVal > 0 ? '#fb7185' : '#10b981', marginTop: '2px', display: 'block' }}>
+            <span style={{ fontSize: '0.7rem', color: trendData.latestMonth.momDiffVal > 0 ? 'var(--danger)' : 'var(--success)', marginTop: '2px', display: 'block' }}>
               {trendData.latestMonth.momDiffVal > 0 ? '⚠️ Spesa in aumento rispetto al mese precedente' : trendData.latestMonth.momDiffVal < 0 ? '✓ Spesa in calo (risparmio)' : 'Stabile'}
             </span>
           </div>
@@ -400,7 +400,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
           {/* KPI 4: Mese con Picco Massimo */}
           <div style={{ padding: '14px', borderRadius: '12px', background: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
             <span style={{ fontSize: '0.74rem', color: 'var(--muted)', fontWeight: 600 }}>Mese di Massimo Rincaro / Picco</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f59e0b', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--warning)', marginTop: '4px', fontFamily: 'var(--font-mono)' }}>
               {formatEuro(trendData.peakMonth.totalSpent)}
             </div>
             <span style={{ fontSize: '0.7rem', color: 'var(--muted)', marginTop: '2px', display: 'block' }}>
@@ -422,15 +422,15 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.74rem', color: 'var(--muted)' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#3b82f6' }} />
+                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-6)' }} />
                 Spesa del Mese
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#f59e0b' }} />
+                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--warning)' }} />
                 Mese di Picco
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '18px', height: '2px', borderTop: '2px dashed #94a3b8' }} />
+                <span style={{ width: '18px', height: '2px', borderTop: '2px dashed var(--chart-axis)' }} />
                 Media 6 Mesi ({formatEuro(trendData.avgMonthly)})
               </span>
             </div>
@@ -448,7 +448,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       y1={avgY}
                       x2="610"
                       y2={avgY}
-                      stroke="#94a3b8"
+                      stroke="var(--chart-axis)"
                       strokeWidth="1.5"
                       strokeDasharray="4,4"
                       opacity="0.6"
@@ -456,7 +456,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                     <text
                       x="615"
                       y={avgY + 4}
-                      fill="#94a3b8"
+                      fill="var(--chart-axis)"
                       fontSize="9"
                       fontWeight="600"
                       textAnchor="start"
@@ -478,7 +478,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
 
                 const isPeak = m.totalSpent === trendData.peakMonth.totalSpent && m.totalSpent > 0;
                 const isHovered = hoveredMonthKey === m.key;
-                const barColor = isPeak ? '#f59e0b' : isHovered ? '#60a5fa' : '#3b82f6';
+                const barColor = isPeak ? 'var(--warning)' : isHovered ? 'var(--chart-2)' : 'var(--chart-6)';
 
                 return (
                   <g
@@ -513,7 +513,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                     <text
                       x={x + colWidth / 2}
                       y={y - 8}
-                      fill={isPeak ? '#f59e0b' : 'var(--text)'}
+                      fill={isPeak ? 'var(--warning)' : 'var(--text)'}
                       fontSize="11"
                       fontWeight="700"
                       textAnchor="middle"
@@ -543,12 +543,12 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                           width="56"
                           height="16"
                           rx="4"
-                          fill={m.momDiffVal > 0 ? 'rgba(251, 113, 133, 0.15)' : m.momDiffVal < 0 ? 'rgba(16, 185, 129, 0.15)' : 'var(--overlay-medium)'}
+                          fill={m.momDiffVal > 0 ? 'var(--danger-soft)' : m.momDiffVal < 0 ? 'var(--success-soft)' : 'var(--overlay-medium)'}
                         />
                         <text
                           x={x + colWidth / 2}
                           y={chartHeight - 14}
-                          fill={m.momDiffVal > 0 ? '#fb7185' : m.momDiffVal < 0 ? '#10b981' : 'var(--muted)'}
+                          fill={m.momDiffVal > 0 ? 'var(--chart-negative)' : m.momDiffVal < 0 ? 'var(--chart-positive)' : 'var(--muted)'}
                           fontSize="9.5"
                           fontWeight="750"
                           textAnchor="middle"
@@ -603,7 +603,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       <td>
                         <strong style={{ fontSize: '0.85rem' }}>{m.fullLabel}</strong>
                         {m.totalSpent === trendData.peakMonth.totalSpent && m.totalSpent > 0 && (
-                          <span style={{ marginLeft: '6px', fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', fontWeight: 700 }}>
+                          <span style={{ marginLeft: '6px', fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: 'var(--warning-soft)', color: 'var(--warning)', fontWeight: 700 }}>
                             Picco
                           </span>
                         )}
@@ -615,7 +615,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                         {m.isFirst ? (
                           <span style={{ color: 'var(--muted)', fontSize: '0.75rem' }}>-</span>
                         ) : (
-                          <span style={{ color: isUp ? '#fb7185' : isDown ? '#10b981' : 'var(--muted)', fontWeight: 650 }}>
+                          <span style={{ color: isUp ? 'var(--danger)' : isDown ? 'var(--success)' : 'var(--muted)', fontWeight: 650 }}>
                             {formatSignedEuro(m.momDiffVal)}
                           </span>
                         )}
@@ -631,8 +631,8 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                               borderRadius: '6px',
                               fontSize: '0.78rem',
                               fontWeight: 700,
-                              background: isUp ? 'rgba(251, 113, 133, 0.15)' : isDown ? 'rgba(16, 185, 129, 0.15)' : 'var(--overlay-subtle)',
-                              color: isUp ? '#fb7185' : isDown ? '#10b981' : 'var(--muted)',
+                              background: isUp ? 'var(--danger-soft)' : isDown ? 'var(--success-soft)' : 'var(--overlay-subtle)',
+                              color: isUp ? 'var(--danger)' : isDown ? 'var(--success)' : 'var(--muted)',
                             }}
                           >
                             {isUp ? `+${m.momDiffPct.toFixed(1)}%` : `${m.momDiffPct.toFixed(1)}%`}
@@ -684,7 +684,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
           <div style={{ padding: '16px', borderRadius: '14px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
               <span style={{ fontSize: '1rem' }}>📈</span>
-              <strong style={{ fontSize: '0.88rem', color: '#fb7185' }}>Maggiori Aumenti di Spesa (Mese su Mese)</strong>
+              <strong style={{ fontSize: '0.88rem', color: 'var(--danger)' }}>Maggiori Aumenti di Spesa (Mese su Mese)</strong>
             </div>
 
             {categoryMoMRanking.topIncreases.length === 0 ? (
@@ -703,8 +703,8 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       alignItems: 'center',
                       padding: '8px 12px',
                       borderRadius: '8px',
-                      background: selectedCategory === item.cat ? 'rgba(251, 113, 133, 0.15)' : 'var(--overlay-subtle)',
-                      border: `1px solid ${selectedCategory === item.cat ? 'rgba(251, 113, 133, 0.4)' : 'var(--border)'}`,
+                      background: selectedCategory === item.cat ? 'var(--danger-soft)' : 'var(--overlay-subtle)',
+                      border: `1px solid ${selectedCategory === item.cat ? 'var(--danger-border-strong)' : 'var(--border)'}`,
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                     }}
@@ -717,10 +717,10 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       </span>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fb7185', fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
                         +{formatEuro(item.diffVal)}
                       </span>
-                      <span style={{ fontSize: '0.72rem', color: '#fb7185', fontWeight: 700, display: 'block' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--danger)', fontWeight: 700, display: 'block' }}>
                         +{item.diffPct.toFixed(1)}%
                       </span>
                     </div>
@@ -734,7 +734,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
           <div style={{ padding: '16px', borderRadius: '14px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '12px' }}>
               <span style={{ fontSize: '1rem' }}>🎉</span>
-              <strong style={{ fontSize: '0.88rem', color: '#10b981' }}>Maggiori Risparmi (Spesa in Calo)</strong>
+              <strong style={{ fontSize: '0.88rem', color: 'var(--success)' }}>Maggiori Risparmi (Spesa in Calo)</strong>
             </div>
 
             {categoryMoMRanking.topDecreases.length === 0 ? (
@@ -753,8 +753,8 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       alignItems: 'center',
                       padding: '8px 12px',
                       borderRadius: '8px',
-                      background: selectedCategory === item.cat ? 'rgba(16, 185, 129, 0.15)' : 'var(--overlay-subtle)',
-                      border: `1px solid ${selectedCategory === item.cat ? 'rgba(16, 185, 129, 0.4)' : 'var(--border)'}`,
+                      background: selectedCategory === item.cat ? 'var(--success-soft)' : 'var(--overlay-subtle)',
+                      border: `1px solid ${selectedCategory === item.cat ? 'var(--success-border)' : 'var(--border)'}`,
                       cursor: 'pointer',
                       transition: 'all 0.15s ease',
                     }}
@@ -767,10 +767,10 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
                       </span>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#10b981', fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>
                         {formatEuro(item.diffVal)}
                       </span>
-                      <span style={{ fontSize: '0.72rem', color: '#10b981', fontWeight: 700, display: 'block' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--success)', fontWeight: 700, display: 'block' }}>
                         {item.diffPct.toFixed(1)}%
                       </span>
                     </div>

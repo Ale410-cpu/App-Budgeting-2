@@ -340,12 +340,12 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
     <div className="cashback-manager-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Executive KPI Grid */}
       <section className="metric-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
-        <div className="metric-card" style={{ borderLeftColor: '#10b981' }}>
+        <div className="metric-card" style={{ borderLeftColor: 'var(--success)' }}>
           <p className="metric-label">Cashback Maturato Questo Mese</p>
-          <h3 style={{ color: '#10b981' }}>{formatEuro(totalAccruedThisMonth)}</h3>
+          <h3 style={{ color: 'var(--success)' }}>{formatEuro(totalAccruedThisMonth)}</h3>
           <span className="metric-delta">Somma calcolata sulle spese in corso</span>
         </div>
-        <div className="metric-card" style={{ borderLeftColor: '#38bdf8' }}>
+        <div className="metric-card" style={{ borderLeftColor: 'var(--info)' }}>
           <p className="metric-label">Spese Valide con Cashback</p>
           <h3>{formatEuro(totalQualifyingSpentThisMonth)}</h3>
           <span className="metric-delta">Esclusi trasferimenti e giroconti</span>
@@ -355,7 +355,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
           <h3>{activeRulesCount} <small style={{ fontSize: '0.9rem', color: 'var(--muted)' }}>/ {cashbackRules.length}</small></h3>
           <span className="metric-delta">Conti con cashback configurato</span>
         </div>
-        <div className="metric-card" style={{ borderLeftColor: '#f59e0b' }}>
+        <div className="metric-card" style={{ borderLeftColor: 'var(--warning)' }}>
           <p className="metric-label">Prossimo Accredito / Investimento</p>
           <h3 style={{ fontSize: '1.15rem' }}>
             {nextExecutionStat ? formatDisplayDate(nextExecutionStat.schedIso) : 'Nessuna regola'}
@@ -391,7 +391,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                 type="button"
                 className="pill"
                 onClick={() => applyPreset('trade-republic')}
-                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8' }}
+                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'var(--info-soft)', color: 'var(--info)' }}
               >
                 🚀 Trade Republic (1% Saveback)
               </button>
@@ -399,7 +399,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                 type="button"
                 className="pill"
                 onClick={() => applyPreset('bbva')}
-                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'rgba(16, 185, 129, 0.12)', color: '#10b981' }}
+                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'var(--success-soft)', color: 'var(--success)' }}
               >
                 💳 BBVA (4% Cashback)
               </button>
@@ -407,7 +407,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                 type="button"
                 className="pill"
                 onClick={() => applyPreset('crypto')}
-                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b' }}
+                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'var(--warning-soft)', color: 'var(--warning)' }}
               >
                 💎 Crypto.com (2% CRO)
               </button>
@@ -415,7 +415,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                 type="button"
                 className="pill"
                 onClick={() => applyPreset('revolut')}
-                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' }}
+                style={{ fontSize: '0.72rem', padding: '4px 10px', background: 'color-mix(in srgb, var(--chart-3) 12%, transparent)', color: 'var(--chart-3)' }}
               >
                 ⚡ Revolut Pro (1%)
               </button>
@@ -563,9 +563,9 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
 
               {/* Asset Destination Config: Choose Existing or Create New */}
               {destination === 'asset' && (
-                <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(56, 189, 248, 0.05)', padding: '14px', borderRadius: '12px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+                <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '10px', background: 'var(--info-soft)', padding: '14px', borderRadius: '12px', border: '1px solid var(--info-border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                    <span style={{ fontSize: '0.8rem', fontWeight: 650, color: '#38bdf8' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 650, color: 'var(--info)' }}>
                       Seleziona o crea l'Asset bersaglio:
                     </span>
                     <div style={{ display: 'flex', gap: '8px' }}>
@@ -728,7 +728,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                       padding: '1.2rem',
                       borderRadius: '14px',
                       border: '1px solid var(--border)',
-                      background: rule.isActive ? 'var(--overlay-subtle)' : 'rgba(255, 255, 255, 0.01)',
+                      background: rule.isActive ? 'var(--overlay-medium)' : 'var(--overlay-subtle)',
                       opacity: rule.isActive ? 1 : 0.65,
                       display: 'flex',
                       flexDirection: 'column',
@@ -752,8 +752,8 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                               fontWeight: 700,
                               padding: '2px 8px',
                               borderRadius: '6px',
-                              background: 'rgba(52, 211, 153, 0.15)',
-                              color: '#34d399',
+                              background: 'var(--success-soft)',
+                              color: 'var(--success)',
                             }}
                           >
                             {rule.percentage}% {rule.destination === 'asset' ? 'Saveback' : 'Cashback'}
@@ -796,11 +796,11 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                         <span style={{ fontSize: '0.7rem', color: 'var(--muted)', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                           Maturato questo mese
                         </span>
-                        <strong style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', color: '#10b981' }}>
+                        <strong style={{ fontSize: '1.25rem', fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>
                           {formatEuro(accrued)}
                         </strong>
                         {capReached && (
-                          <span style={{ fontSize: '0.65rem', color: '#f59e0b', display: 'block', fontWeight: 600 }}>
+                          <span style={{ fontSize: '0.65rem', color: 'var(--warning)', display: 'block', fontWeight: 600 }}>
                             Massimale mensile raggiunto
                           </span>
                         )}
@@ -808,7 +808,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                     </div>
 
                     {/* Middle Row: Progress and Spending breakdown */}
-                    <div style={{ background: 'rgba(0, 0, 0, 0.12)', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ background: 'var(--panel-card-bg)', padding: '10px 14px', borderRadius: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                       <div style={{ fontSize: '0.78rem' }}>
                         <span style={{ color: 'var(--muted)' }}>Spese valide sul conto questo mese: </span>
                         <strong>{formatEuro(qualifyingSpent)}</strong>
@@ -820,7 +820,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                       <div style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span style={{ color: 'var(--muted)' }}>Prossima data:</span>
                         <strong>{formatDisplayDate(schedIso)}</strong>
-                        <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', background: daysRemaining <= 3 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.08)', color: daysRemaining <= 3 ? '#f59e0b' : 'var(--muted)' }}>
+                        <span style={{ fontSize: '0.68rem', padding: '2px 6px', borderRadius: '4px', background: daysRemaining <= 3 ? 'var(--warning-soft)' : 'var(--overlay-medium)', color: daysRemaining <= 3 ? 'var(--warning)' : 'var(--muted)' }}>
                           {daysRemaining === 0 ? 'Oggi' : `Tra ${daysRemaining} gg`}
                         </span>
                       </div>
@@ -844,9 +844,9 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                           padding: '6px 14px',
                           fontSize: '0.78rem',
                           fontWeight: 650,
-                          background: 'rgba(16, 185, 129, 0.15)',
-                          color: '#10b981',
-                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          background: 'var(--success-soft)',
+                          color: 'var(--success)',
+                          border: '1px solid var(--success-border)',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '6px',
@@ -862,7 +862,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                       {/* Right: State toggle, edit, delete */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {alreadyExecutedThisMonth && (
-                          <span style={{ fontSize: '0.72rem', color: '#10b981', background: 'rgba(16, 185, 129, 0.1)', padding: '3px 8px', borderRadius: '6px' }}>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--success)', background: 'var(--success-soft)', padding: '3px 8px', borderRadius: '6px' }}>
                             ✓ Registrato il {formatDisplayDate(rule.lastInvestedDate!)}
                           </span>
                         )}
@@ -874,8 +874,8 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                           style={{
                             padding: '4px 10px',
                             fontSize: '0.72rem',
-                            background: rule.isActive ? 'rgba(52, 211, 153, 0.15)' : 'rgba(255, 255, 255, 0.08)',
-                            color: rule.isActive ? '#34d399' : 'var(--muted)',
+                            background: rule.isActive ? 'var(--success-soft)' : 'var(--overlay-medium)',
+                            color: rule.isActive ? 'var(--success)' : 'var(--muted)',
                           }}
                         >
                           {rule.isActive ? 'Attivo' : 'In Pausa'}
@@ -888,7 +888,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                           style={{
                             padding: '4px 10px',
                             fontSize: '0.72rem',
-                            background: editingRuleId === rule.id ? 'var(--accent)' : 'rgba(255, 255, 255, 0.08)',
+                            background: editingRuleId === rule.id ? 'var(--accent)' : 'var(--overlay-medium)',
                             color: editingRuleId === rule.id ? 'var(--pill-primary-text)' : 'var(--text)',
                           }}
                         >
@@ -906,8 +906,8 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
                           style={{
                             padding: '4px 10px',
                             fontSize: '0.72rem',
-                            background: 'rgba(251, 113, 133, 0.12)',
-                            color: '#fb7185',
+                            background: 'var(--danger-soft)',
+                            color: 'var(--danger)',
                           }}
                         >
                           Elimina
@@ -928,7 +928,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: 'var(--scrim)',
             backdropFilter: 'blur(4px)',
             display: 'flex',
             alignItems: 'center',
@@ -949,7 +949,7 @@ export const CashbackManager: React.FC<CashbackManagerProps> = ({
               display: 'flex',
               flexDirection: 'column',
               gap: '16px',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+              boxShadow: 'var(--shadow-lg)',
             }}
             onClick={(e) => e.stopPropagation()}
           >

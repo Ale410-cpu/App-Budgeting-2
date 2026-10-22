@@ -44,6 +44,21 @@ ISTRUZIONI DI INSTALLAZIONE PER CHI RICEVE L'APP (3 Secondi)
      Launchpad. Si aprirà all'istante senza schermate nere!
 
 -----------------------------------------------------------------------------
+NOTIFICHE DI SISTEMA:
+-----------------------------------------------------------------------------
+Le notifiche di budget, scadenze e promemoria arrivano sul MAC nel Notification
+Center (icona in alto a destra), come qualsiasi altra notifica: compaiono
+all'angolo in alto a destra, restano nel Centro Notifiche e suonano.
+
+Se non le vedi:
+- Controlla in "Impostazioni di Sistema → Notifiche → BudgetingMacApp" che le
+  notifiche siano consentite.
+- Assicurati che l'applicazione sia stata copiata in /Applications (non lanciata
+  da una cartella temporanea).
+- Le notifiche seguono le modalità di concentrazione (Focus) del sistema: se una
+  di queste è attiva, macOS le silenzia senza avvisarti.
+
+-----------------------------------------------------------------------------
 DOVE VENGONO SALVATI I TUOI DATI E COME VENGONO SINCRONIZZATI:
 -----------------------------------------------------------------------------
 Tutti i dati registrati (transazioni, conti, categorie, patrimonio, PAC) vengono

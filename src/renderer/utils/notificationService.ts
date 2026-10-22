@@ -1,8 +1,24 @@
 /**
  * Notification Service for Budget Ledger (macOS & Web Support)
- * Handles native macOS Electron notifications, standard Web Notification alerts,
- * synthesized sound alerts, and scheduled budget & deadline checks.
+ *
+ * Delivery model
+ * --------------
+ * On macOS the notification is delivered to the **operating system** (Notification
+ * Center), never to a banner inside the app:
+ *
+ *   1. Native system notification through the Electron main process, which uses
+ *      `UNUserNotificationCenter` when the build is signed and falls back to the
+ *      Apple-signed `osascript` helper when macOS refuses to authorize an
+ *      unsigned application.
+ *   2. Only when no system channel is available (browser build) the service
+ *      falls back to the Service Worker / Web Notification API and to the
+ *      in-app banner.
+ *
+ * The sound is played by the operating system for native notifications, so the
+ * renderer never synthesizes a second chime on top of it.
  */
+
+export type NotificationChannel = 'native' | 'applescript' | 'none';
 
 export interface AppNotification {
   id: string;
@@ -11,6 +27,16 @@ export interface AppNotification {
   category: 'budget' | 'recurring' | 'goal' | 'system' | 'summary';
   timestamp: number;
   read?: boolean;
+}
+
+export interface NativeNotificationCapability {
+  supported: boolean;
+  channel: NotificationChannel;
+  bundleId: string;
+  appName: string;
+  platform: string;
+  signed?: boolean;
+  error?: string;
 }
 
 export interface NotificationSettings {
@@ -98,6 +124,19 @@ export const getNotificationSupportStatus = (): {
     permission: Notification.permission,
     platformLabel,
   };
+};
+
+/**
+ * Asks the main process which channel will carry the notifications.
+ * On macOS this is the Notification Center, not the app window.
+ */
+export const getNativeNotificationCapability = async (): Promise<NativeNotificationCapability | null> => {
+  if (!isElectronEnv() || !window.budgetApp?.getNotificationCapability) return null;
+  try {
+    return await window.budgetApp.getNotificationCapability();
+  } catch {
+    return null;
+  }
 };
 
 export const loadNotificationSettings = (): NotificationSettings => {
@@ -231,7 +270,11 @@ export const requestAppNotificationPermission = async (): Promise<{
 };
 
 /**
- * Dispatch an application notification across macOS Electron or Web Browser
+ * Dispatch an application notification.
+ *
+ * On macOS the notification is delivered by the operating system (Notification
+ * Center). The in-app banner and the synthesized chime are only used by the
+ * browser build, where no system channel is available.
  */
 export const sendAppNotification = async (params: {
   title: string;
@@ -239,7 +282,14 @@ export const sendAppNotification = async (params: {
   category?: 'budget' | 'recurring' | 'goal' | 'system' | 'summary';
   silent?: boolean;
   tag?: string;
-}): Promise<{ success: boolean; error?: string; deliveredToSystem?: boolean; permission?: string }> => {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  deliveredToSystem?: boolean;
+  deliveredInApp?: boolean;
+  channel?: NotificationChannel;
+  permission?: string;
+}> => {
   const settings = loadNotificationSettings();
   if (!settings.enabled) {
     return { success: false, error: 'Notifiche disattivate nelle impostazioni dell\'app.' };
@@ -253,12 +303,9 @@ export const sendAppNotification = async (params: {
     return { success: false, error: 'Promemoria disattivati' };
   }
 
-  // Play synthesized audio alert if sound is enabled
-  if (settings.soundEnabled && !params.silent) {
-    playNotificationSound();
-  }
+  const silent = Boolean(params.silent) || !settings.soundEnabled;
 
-  // Record in in-app notification history
+  // Record in the notification log (history of what the app reported)
   const historyItem: AppNotification = {
     id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     title: params.title,
@@ -270,34 +317,30 @@ export const sendAppNotification = async (params: {
   const history = loadNotificationHistory();
   saveNotificationHistory([historyItem, ...history]);
 
-  // Dispatch in-app visual notification event (Toast Banner) so it's ALWAYS visible immediately!
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(
-      new CustomEvent('app-notification-received', {
-        detail: historyItem,
-      })
-    );
-  }
-
   let deliveredToSystem = false;
+  let channel: NotificationChannel = 'none';
 
-  // 1. Electron on macOS: Dispatch native desktop notification
+  // 1. macOS / Electron — the notification goes to Notification Center
   if (isElectronEnv() && window.budgetApp?.sendNotification) {
     try {
       const res = await window.budgetApp.sendNotification({
         title: params.title,
         body: params.body,
-        silent: params.silent || !settings.soundEnabled,
+        silent,
+        tag: params.tag,
       });
-      if (res && res.success) {
+      if (res?.success) {
         deliveredToSystem = true;
+        channel = res.channel ?? 'native';
+      } else {
+        channel = res?.channel ?? 'none';
       }
     } catch (err: any) {
       console.warn('Electron notification fallback:', err);
     }
   }
 
-  // 2. Service Worker showNotification (for background & desktop PWA)
+  // 2. Browser build only — Service Worker showNotification (background & desktop PWA)
   if (!deliveredToSystem && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
@@ -308,16 +351,17 @@ export const sendAppNotification = async (params: {
           badge: '/icon-192.png',
           tag: params.tag || `budget-${category}-${Date.now()}`,
           vibrate: [100, 50, 100],
-          silent: params.silent || !settings.soundEnabled,
+          silent,
         } as any);
         deliveredToSystem = true;
+        channel = 'native';
       }
     } catch (swErr) {
       console.warn('Service worker showNotification fallback:', swErr);
     }
   }
 
-  // 3. Standard Web Notification API
+  // 3. Browser build only — standard Web Notification API
   if (!deliveredToSystem && typeof window !== 'undefined' && 'Notification' in window) {
     if (Notification.permission === 'granted') {
       try {
@@ -325,21 +369,40 @@ export const sendAppNotification = async (params: {
           body: params.body,
           icon: '/icon-192.png',
           tag: params.tag || `budget-${category}-${Date.now()}`,
-          silent: params.silent || !settings.soundEnabled,
+          silent,
         });
         notif.onclick = () => {
           window.focus();
         };
         deliveredToSystem = true;
+        channel = 'native';
       } catch (notifErr: any) {
         console.warn('Direct Notification constructor failed:', notifErr);
       }
     }
   }
 
+  // 4. In-app banner — only when the system could not deliver the notification
+  let deliveredInApp = false;
+  if (!deliveredToSystem) {
+    if (settings.soundEnabled && !params.silent) {
+      playNotificationSound();
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('app-notification-received', {
+          detail: historyItem,
+        })
+      );
+      deliveredInApp = true;
+    }
+  }
+
   return {
-    success: true,
+    success: deliveredToSystem || deliveredInApp,
     deliveredToSystem,
+    deliveredInApp,
+    channel,
     permission: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported',
   };
 };
@@ -402,7 +465,7 @@ export const checkAndTriggerFinancialAlerts = async (options: {
         sentRegistry[key] = todayDateStr;
         alertCount++;
         await sendAppNotification({
-          title: `📅 Scadenza Ricorrente: ${rec.merchant}`,
+          title: `Scadenza ricorrente: ${rec.merchant}`,
           body: `Oggi è prevista l'uscita ricorrente di € ${rec.amount.toFixed(2)} sul conto "${rec.account}".`,
           category: 'recurring',
           tag: `rec-${rec.id}`,
@@ -423,7 +486,7 @@ export const checkAndTriggerFinancialAlerts = async (options: {
           sentRegistry[key] = todayDateStr;
           alertCount++;
           await sendAppNotification({
-            title: `⚠️ Budget Superato: ${cat.name}`,
+            title: `Budget superato: ${cat.name}`,
             body: `Hai superato il budget mensile per "${cat.name}": spesi € ${cat.spent.toFixed(2)} su € ${cat.budget.toFixed(2)} (${Math.round(percentage)}%).`,
             category: 'budget',
             tag: `budget-100-${cat.name}`,
@@ -435,7 +498,7 @@ export const checkAndTriggerFinancialAlerts = async (options: {
           sentRegistry[key] = todayDateStr;
           alertCount++;
           await sendAppNotification({
-            title: `⚡ Attenzione Budget: ${cat.name}`,
+            title: `Attenzione al budget: ${cat.name}`,
             body: `Sei all'${Math.round(percentage)}% del budget mensile per "${cat.name}" (€ ${cat.spent.toFixed(2)} / € ${cat.budget.toFixed(2)}).`,
             category: 'budget',
             tag: `budget-80-${cat.name}`,
@@ -492,7 +555,7 @@ export const checkTransactionReminder = async (latestTransactionIsoDate?: string
   } catch {}
 
   await sendAppNotification({
-    title: '✍️ Promemoria: Registra le tue spese',
+    title: 'Promemoria: registra le tue spese',
     body: `È passato del tempo dal tuo ultimo aggiornamento.${daysNotice} Inserisci le spese o le entrate recenti per mantenere i conti in ordine.`,
     category: 'summary',
     tag: 'transaction-reminder',
@@ -504,9 +567,15 @@ export const checkTransactionReminder = async (latestTransactionIsoDate?: string
 /**
  * Sends an immediate test reminder for transactions update
  */
-export const sendTestTransactionReminder = async (): Promise<{ success: boolean; error?: string }> => {
+export const sendTestTransactionReminder = async (): Promise<{
+  success: boolean;
+  error?: string;
+  deliveredToSystem?: boolean;
+  deliveredInApp?: boolean;
+  channel?: NotificationChannel;
+}> => {
   return sendAppNotification({
-    title: '✍️ Promemoria: Registra le tue spese',
+    title: 'Promemoria: registra le tue spese',
     body: 'Questo è un promemoria di prova: ricordati di registrare i nuovi scontrini, uscite o bonifici per avere il budget aggiornato!',
     category: 'summary',
     tag: 'transaction-reminder-test',

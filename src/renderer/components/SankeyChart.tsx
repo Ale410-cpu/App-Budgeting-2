@@ -63,29 +63,29 @@ interface SankeyLink {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  'Spesa alimentare': '#10b981',
-  'Alimentari': '#10b981',
-  'Supermercato': '#10b981',
-  'Trasporti': '#0ea5e9',
-  'Auto & Carburante': '#0ea5e9',
-  'Casa': '#f59e0b',
-  'Utenze': '#f59e0b',
-  'Affitto': '#f59e0b',
-  'Salute': '#ec4899',
-  'Ristoranti': '#8b5cf6',
-  'Bar & Ristoranti': '#8b5cf6',
-  'Tempo libero': '#a855f7',
-  'Shopping': '#ec4899',
-  'Abbonamenti': '#6366f1',
-  'Viaggi': '#14b8a6',
-  'Istruzione': '#06b6d4',
-  'Investimenti': '#3b82f6',
-  'PAC': '#3b82f6',
-  'Risparmio': '#34d399',
-  'Altro': '#94a3b8',
+  'Spesa alimentare': 'var(--chart-7)',
+  'Alimentari': 'var(--chart-7)',
+  'Supermercato': 'var(--chart-7)',
+  'Trasporti': 'var(--chart-2)',
+  'Auto & Carburante': 'var(--chart-2)',
+  'Casa': 'var(--chart-4)',
+  'Utenze': 'var(--chart-4)',
+  'Affitto': 'var(--chart-4)',
+  'Salute': 'var(--chart-5)',
+  'Ristoranti': 'var(--chart-3)',
+  'Bar & Ristoranti': 'var(--chart-3)',
+  'Tempo libero': 'var(--chart-3)',
+  'Shopping': 'var(--chart-5)',
+  'Abbonamenti': 'var(--chart-6)',
+  'Viaggi': 'var(--chart-1)',
+  'Istruzione': 'var(--chart-2)',
+  'Investimenti': 'var(--chart-6)',
+  'PAC': 'var(--chart-6)',
+  'Risparmio': 'var(--chart-positive)',
+  'Altro': 'var(--chart-8)',
 };
 
-const DEFAULT_CATEGORY_COLOR = '#64748b';
+const DEFAULT_CATEGORY_COLOR = 'var(--chart-neutral)';
 
 export type Rule503020Bucket = 'needs' | 'wants' | 'savings';
 export type Rule503020Mapping = Record<string, Rule503020Bucket>;
@@ -357,7 +357,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         id: `inc-${idx}`,
         label: source,
         value: amt,
-        color: '#10b981',
+        color: 'var(--chart-positive)',
         column: 0,
       });
     });
@@ -368,7 +368,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         id: 'macro-needs',
         label: 'Necessità (50%)',
         value: needs,
-        color: '#f59e0b',
+        color: 'var(--chart-4)',
         column: 1,
       });
     }
@@ -378,7 +378,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         id: 'macro-wants',
         label: 'Svago & Desideri (30%)',
         value: wants,
-        color: '#8b5cf6',
+        color: 'var(--chart-3)',
         column: 1,
       });
     }
@@ -388,7 +388,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         id: 'macro-savings',
         label: 'Risparmio & Investimenti (20%)',
         value: totalSavings,
-        color: '#34d399',
+        color: 'var(--chart-positive)',
         column: 1,
       });
     }
@@ -411,7 +411,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         id: 'dest-unspent-savings',
         label: 'Risparmio Netto Non Speso',
         value: unspentFlow,
-        color: '#34d399',
+        color: 'var(--chart-positive)',
         column: 2,
       });
     }
@@ -428,7 +428,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
             sourceId: incId,
             targetId: 'macro-needs',
             value: val,
-            color: '#f59e0b',
+            color: 'var(--chart-4)',
           });
         }
         if (wants > 0) {
@@ -437,7 +437,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
             sourceId: incId,
             targetId: 'macro-wants',
             value: val,
-            color: '#8b5cf6',
+            color: 'var(--chart-3)',
           });
         }
         if (totalSavings > 0) {
@@ -446,7 +446,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
             sourceId: incId,
             targetId: 'macro-savings',
             value: val,
-            color: '#34d399',
+            color: 'var(--chart-positive)',
           });
         }
       });
@@ -488,7 +488,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
         sourceId: 'macro-savings',
         targetId: 'dest-unspent-savings',
         value: unspentFlow,
-        color: '#34d399',
+        color: 'var(--chart-positive)',
       });
     }
 
@@ -672,18 +672,18 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 🏠 Necessità (Target: 50%)
               </span>
-              <span style={{ fontSize: '0.82rem', color: '#f59e0b', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--chart-4)', fontWeight: 700 }}>
                 {needsPct.toFixed(1)}%
               </span>
             </div>
             <div style={{ height: '6px', borderRadius: '3px', background: 'var(--overlay-medium)', marginTop: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, needsPct)}%`, height: '100%', background: '#f59e0b', borderRadius: '3px' }} />
+              <div style={{ width: `${Math.min(100, needsPct)}%`, height: '100%', background: 'var(--chart-4)', borderRadius: '3px' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '8px' }}>
               <strong style={{ fontSize: '0.95rem', color: 'var(--text)' }}>
                 {formatEuro(needsVal)}
               </strong>
-              <span style={{ fontSize: '0.72rem', color: needsPct <= 50 ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.72rem', color: needsPct <= 50 ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
                 {needsPct <= 50 ? `✓ In target (-${(50 - needsPct).toFixed(1)}%)` : `+${(needsPct - 50).toFixed(1)}% eccedenza`}
               </span>
             </div>
@@ -698,18 +698,18 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 🎉 Svago & Desideri (Target: 30%)
               </span>
-              <span style={{ fontSize: '0.82rem', color: '#8b5cf6', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--chart-3)', fontWeight: 700 }}>
                 {wantsPct.toFixed(1)}%
               </span>
             </div>
             <div style={{ height: '6px', borderRadius: '3px', background: 'var(--overlay-medium)', marginTop: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, wantsPct)}%`, height: '100%', background: '#8b5cf6', borderRadius: '3px' }} />
+              <div style={{ width: `${Math.min(100, wantsPct)}%`, height: '100%', background: 'var(--chart-3)', borderRadius: '3px' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '8px' }}>
               <strong style={{ fontSize: '0.95rem', color: 'var(--text)' }}>
                 {formatEuro(wantsVal)}
               </strong>
-              <span style={{ fontSize: '0.72rem', color: wantsPct <= 30 ? '#10b981' : '#fb7185', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.72rem', color: wantsPct <= 30 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
                 {wantsPct <= 30 ? `✓ In target (-${(30 - wantsPct).toFixed(1)}%)` : `+${(wantsPct - 30).toFixed(1)}% eccedenza`}
               </span>
             </div>
@@ -724,18 +724,18 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               <span style={{ fontSize: '0.78rem', color: 'var(--muted)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                 💰 Risparmio & Investimenti (Target: 20%)
               </span>
-              <span style={{ fontSize: '0.82rem', color: '#34d399', fontWeight: 700 }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--chart-positive)', fontWeight: 700 }}>
                 {savingsPct.toFixed(1)}%
               </span>
             </div>
             <div style={{ height: '6px', borderRadius: '3px', background: 'var(--overlay-medium)', marginTop: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, savingsPct)}%`, height: '100%', background: '#34d399', borderRadius: '3px' }} />
+              <div style={{ width: `${Math.min(100, savingsPct)}%`, height: '100%', background: 'var(--chart-positive)', borderRadius: '3px' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '8px' }}>
-              <strong style={{ fontSize: '0.95rem', color: '#34d399' }}>
+              <strong style={{ fontSize: '0.95rem', color: 'var(--chart-positive)' }}>
                 {formatEuro(totalSavingsVal)}
               </strong>
-              <span style={{ fontSize: '0.72rem', color: savingsPct >= 20 ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.72rem', color: savingsPct >= 20 ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
                 {savingsPct >= 20 ? `✓ Target superato (+${(savingsPct - 20).toFixed(1)}%)` : `-${(20 - savingsPct).toFixed(1)}% al target`}
               </span>
             </div>
@@ -754,7 +754,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0, 0, 0, 0.65)',
+            background: 'var(--scrim)',
             backdropFilter: 'blur(4px)',
             display: 'flex',
             alignItems: 'center',
@@ -774,7 +774,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               maxHeight: '85vh',
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+              boxShadow: 'var(--shadow-lg)',
               overflow: 'hidden',
             }}
             onClick={(e) => e.stopPropagation()}
@@ -802,13 +802,13 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
             {/* Modal Guide & Add Category Form */}
             <div style={{ padding: '16px 22px', borderBottom: '1px solid var(--border)', background: 'var(--overlay-subtle)', display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', fontSize: '0.74rem' }}>
-                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.25)', color: '#f59e0b' }}>
+                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--warning-soft)', border: '1px solid var(--warning-border)', color: 'var(--warning)' }}>
                   <strong>🏠 Necessità (50%)</strong>: Affitto, mutuo, alimentari, bollette, salute, trasporti.
                 </div>
-                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'rgba(139, 92, 246, 0.1)', border: '1px solid rgba(139, 92, 246, 0.25)', color: '#8b5cf6' }}>
+                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'color-mix(in srgb, var(--chart-3) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--chart-3) 25%, transparent)', color: 'var(--chart-3)' }}>
                   <strong>🎉 Svago (30%)</strong>: Ristoranti, uscite, shopping, viaggi, hobby, abbonamenti.
                 </div>
-                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'rgba(52, 211, 153, 0.1)', border: '1px solid rgba(52, 211, 153, 0.25)', color: '#34d399' }}>
+                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--success-soft)', border: '1px solid var(--success-border)', color: 'var(--chart-positive)' }}>
                   <strong>💰 Risparmio (20%)</strong>: PAC, investimenti, fondi pensione, accantonamenti.
                 </div>
               </div>
@@ -910,9 +910,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: '1px solid',
-                      borderColor: configFilterBucket === 'needs' ? '#f59e0b' : 'var(--border)',
-                      background: configFilterBucket === 'needs' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                      color: configFilterBucket === 'needs' ? '#f59e0b' : 'var(--muted)',
+                      borderColor: configFilterBucket === 'needs' ? 'var(--warning)' : 'var(--border)',
+                      background: configFilterBucket === 'needs' ? 'var(--warning-soft)' : 'transparent',
+                      color: configFilterBucket === 'needs' ? 'var(--warning)' : 'var(--muted)',
                     }}
                   >
                     🏠 Necessità
@@ -927,9 +927,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: '1px solid',
-                      borderColor: configFilterBucket === 'wants' ? '#8b5cf6' : 'var(--border)',
-                      background: configFilterBucket === 'wants' ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                      color: configFilterBucket === 'wants' ? '#8b5cf6' : 'var(--muted)',
+                      borderColor: configFilterBucket === 'wants' ? 'var(--chart-3)' : 'var(--border)',
+                      background: configFilterBucket === 'wants' ? 'color-mix(in srgb, var(--chart-3) 20%, transparent)' : 'transparent',
+                      color: configFilterBucket === 'wants' ? 'var(--chart-3)' : 'var(--muted)',
                     }}
                   >
                     🎉 Svago
@@ -944,9 +944,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: '1px solid',
-                      borderColor: configFilterBucket === 'savings' ? '#34d399' : 'var(--border)',
-                      background: configFilterBucket === 'savings' ? 'rgba(52, 211, 153, 0.2)' : 'transparent',
-                      color: configFilterBucket === 'savings' ? '#34d399' : 'var(--muted)',
+                      borderColor: configFilterBucket === 'savings' ? 'var(--chart-positive)' : 'var(--border)',
+                      background: configFilterBucket === 'savings' ? 'var(--success-soft)' : 'transparent',
+                      color: configFilterBucket === 'savings' ? 'var(--chart-positive)' : 'var(--muted)',
                     }}
                   >
                     💰 Risparmio
@@ -961,9 +961,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                       fontWeight: 600,
                       cursor: 'pointer',
                       border: '1px solid',
-                      borderColor: configFilterBucket === 'overridden' ? '#38bdf8' : 'var(--border)',
-                      background: configFilterBucket === 'overridden' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                      color: configFilterBucket === 'overridden' ? '#38bdf8' : 'var(--muted)',
+                      borderColor: configFilterBucket === 'overridden' ? 'var(--info)' : 'var(--border)',
+                      background: configFilterBucket === 'overridden' ? 'var(--info-soft)' : 'transparent',
+                      color: configFilterBucket === 'overridden' ? 'var(--info)' : 'var(--muted)',
                     }}
                   >
                     🔧 Sottocategorie Personalizzate
@@ -1031,7 +1031,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                               justifyContent: 'space-between',
                               alignItems: 'center',
                               padding: '10px 14px',
-                              background: 'rgba(255, 255, 255, 0.02)',
+                              background: 'var(--overlay-subtle)',
                               borderBottom: subs.length > 0 && isExpanded ? '1px solid var(--border)' : 'none',
                               gap: '12px',
                               flexWrap: 'wrap',
@@ -1085,9 +1085,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                   borderRadius: '6px',
                                   fontSize: '0.72rem',
                                   fontWeight: 600,
-                                  background: 'rgba(56, 189, 248, 0.15)',
-                                  color: '#38bdf8',
-                                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                                  background: 'var(--info-soft)',
+                                  color: 'var(--info)',
+                                  border: '1px solid var(--info-border)',
                                 }}
                               >
                                 🔄 Spostamento Patrimoniale (Escluso dai flussi)
@@ -1104,9 +1104,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                     fontWeight: 650,
                                     cursor: 'pointer',
                                     border: '1px solid',
-                                    borderColor: catBucket === 'needs' ? '#f59e0b' : 'var(--border)',
-                                    background: catBucket === 'needs' ? 'rgba(245, 158, 11, 0.22)' : 'transparent',
-                                    color: catBucket === 'needs' ? '#f59e0b' : 'var(--muted)',
+                                    borderColor: catBucket === 'needs' ? 'var(--warning)' : 'var(--border)',
+                                    background: catBucket === 'needs' ? 'var(--warning-soft)' : 'transparent',
+                                    color: catBucket === 'needs' ? 'var(--warning)' : 'var(--muted)',
                                   }}
                                 >
                                   🏠 Necessità
@@ -1121,9 +1121,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                     fontWeight: 650,
                                     cursor: 'pointer',
                                     border: '1px solid',
-                                    borderColor: catBucket === 'wants' ? '#8b5cf6' : 'var(--border)',
-                                    background: catBucket === 'wants' ? 'rgba(139, 92, 246, 0.22)' : 'transparent',
-                                    color: catBucket === 'wants' ? '#8b5cf6' : 'var(--muted)',
+                                    borderColor: catBucket === 'wants' ? 'var(--chart-3)' : 'var(--border)',
+                                    background: catBucket === 'wants' ? 'color-mix(in srgb, var(--chart-3) 20%, transparent)' : 'transparent',
+                                    color: catBucket === 'wants' ? 'var(--chart-3)' : 'var(--muted)',
                                   }}
                                 >
                                   🎉 Svago
@@ -1138,9 +1138,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                     fontWeight: 650,
                                     cursor: 'pointer',
                                     border: '1px solid',
-                                    borderColor: catBucket === 'savings' ? '#34d399' : 'var(--border)',
-                                    background: catBucket === 'savings' ? 'rgba(52, 211, 153, 0.22)' : 'transparent',
-                                    color: catBucket === 'savings' ? '#34d399' : 'var(--muted)',
+                                    borderColor: catBucket === 'savings' ? 'var(--chart-positive)' : 'var(--border)',
+                                    background: catBucket === 'savings' ? 'var(--success-soft)' : 'transparent',
+                                    color: catBucket === 'savings' ? 'var(--chart-positive)' : 'var(--muted)',
                                   }}
                                 >
                                   💰 Risparmio
@@ -1151,7 +1151,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
 
                           {/* Subcategories list */}
                           {subs.length > 0 && isExpanded && (
-                            <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(0, 0, 0, 0.15)', padding: '6px 12px 6px 36px', gap: '6px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--panel-card-bg)', padding: '6px 12px 6px 36px', gap: '6px' }}>
                               {subs.map((sub) => {
                                 const subInfo = getSubcategoryBucket(cat.name, sub.name, userMappings);
                                 const isOverridden = !subInfo.isInherited;
@@ -1165,8 +1165,8 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                       alignItems: 'center',
                                       padding: '6px 10px',
                                       borderRadius: '8px',
-                                      background: isOverridden ? 'rgba(56, 189, 248, 0.05)' : 'transparent',
-                                      border: isOverridden ? '1px dashed rgba(56, 189, 248, 0.25)' : '1px solid transparent',
+                                      background: isOverridden ? 'var(--info-soft)' : 'transparent',
+                                      border: isOverridden ? '1px dashed var(--info-border)' : '1px solid transparent',
                                       gap: '10px',
                                       flexWrap: 'wrap',
                                     }}
@@ -1177,11 +1177,11 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                         {sub.name}
                                       </span>
                                       {isOverridden ? (
-                                        <span style={{ fontSize: '0.68rem', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                                        <span style={{ fontSize: '0.68rem', color: 'var(--info)', background: 'var(--info-soft)', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>
                                           Personalizzata
                                         </span>
                                       ) : (
-                                        <span style={{ fontSize: '0.68rem', color: 'var(--muted)', background: 'rgba(255, 255, 255, 0.05)', padding: '1px 6px', borderRadius: '4px' }}>
+                                        <span style={{ fontSize: '0.68rem', color: 'var(--muted)', background: 'var(--overlay-medium)', padding: '1px 6px', borderRadius: '4px' }}>
                                           Eredita ({catBucket === 'needs' ? 'Necessità' : catBucket === 'savings' ? 'Risparmio' : 'Svago'})
                                         </span>
                                       )}
@@ -1189,7 +1189,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
 
                                     {/* Subcategory Bucket Overrides */}
                                     {isTransferCategory(cat.name, sub.name) ? (
-                                      <span style={{ fontSize: '0.7rem', color: '#38bdf8', fontStyle: 'italic', padding: '2px 8px' }}>
+                                      <span style={{ fontSize: '0.7rem', color: 'var(--info)', fontStyle: 'italic', padding: '2px 8px' }}>
                                         Spostamento patrimoniale
                                       </span>
                                     ) : (
@@ -1222,9 +1222,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                             fontWeight: subInfo.bucket === 'needs' ? 650 : 500,
                                             cursor: 'pointer',
                                             border: '1px solid',
-                                            borderColor: subInfo.bucket === 'needs' ? '#f59e0b' : 'var(--border)',
-                                            background: subInfo.bucket === 'needs' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                                            color: subInfo.bucket === 'needs' ? '#f59e0b' : 'var(--muted)',
+                                            borderColor: subInfo.bucket === 'needs' ? 'var(--warning)' : 'var(--border)',
+                                            background: subInfo.bucket === 'needs' ? 'var(--warning-soft)' : 'transparent',
+                                            color: subInfo.bucket === 'needs' ? 'var(--warning)' : 'var(--muted)',
                                             opacity: !isOverridden && subInfo.bucket === 'needs' ? 0.8 : 1,
                                           }}
                                         >
@@ -1240,9 +1240,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                             fontWeight: subInfo.bucket === 'wants' ? 650 : 500,
                                             cursor: 'pointer',
                                             border: '1px solid',
-                                            borderColor: subInfo.bucket === 'wants' ? '#8b5cf6' : 'var(--border)',
-                                            background: subInfo.bucket === 'wants' ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                                            color: subInfo.bucket === 'wants' ? '#8b5cf6' : 'var(--muted)',
+                                            borderColor: subInfo.bucket === 'wants' ? 'var(--chart-3)' : 'var(--border)',
+                                            background: subInfo.bucket === 'wants' ? 'color-mix(in srgb, var(--chart-3) 20%, transparent)' : 'transparent',
+                                            color: subInfo.bucket === 'wants' ? 'var(--chart-3)' : 'var(--muted)',
                                             opacity: !isOverridden && subInfo.bucket === 'wants' ? 0.8 : 1,
                                           }}
                                         >
@@ -1258,9 +1258,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                             fontWeight: subInfo.bucket === 'savings' ? 650 : 500,
                                             cursor: 'pointer',
                                             border: '1px solid',
-                                            borderColor: subInfo.bucket === 'savings' ? '#34d399' : 'var(--border)',
-                                            background: subInfo.bucket === 'savings' ? 'rgba(52, 211, 153, 0.2)' : 'transparent',
-                                            color: subInfo.bucket === 'savings' ? '#34d399' : 'var(--muted)',
+                                            borderColor: subInfo.bucket === 'savings' ? 'var(--chart-positive)' : 'var(--border)',
+                                            background: subInfo.bucket === 'savings' ? 'var(--success-soft)' : 'transparent',
+                                            color: subInfo.bucket === 'savings' ? 'var(--chart-positive)' : 'var(--muted)',
                                             opacity: !isOverridden && subInfo.bucket === 'savings' ? 0.8 : 1,
                                           }}
                                         >
@@ -1327,9 +1327,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 border: '1px solid',
-                                borderColor: currentBucket === 'needs' ? '#f59e0b' : 'var(--border)',
-                                background: currentBucket === 'needs' ? 'rgba(245, 158, 11, 0.2)' : 'transparent',
-                                color: currentBucket === 'needs' ? '#f59e0b' : 'var(--muted)',
+                                borderColor: currentBucket === 'needs' ? 'var(--warning)' : 'var(--border)',
+                                background: currentBucket === 'needs' ? 'var(--warning-soft)' : 'transparent',
+                                color: currentBucket === 'needs' ? 'var(--warning)' : 'var(--muted)',
                               }}
                             >
                               🏠 Necessità
@@ -1344,9 +1344,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 border: '1px solid',
-                                borderColor: currentBucket === 'wants' ? '#8b5cf6' : 'var(--border)',
-                                background: currentBucket === 'wants' ? 'rgba(139, 92, 246, 0.2)' : 'transparent',
-                                color: currentBucket === 'wants' ? '#8b5cf6' : 'var(--muted)',
+                                borderColor: currentBucket === 'wants' ? 'var(--chart-3)' : 'var(--border)',
+                                background: currentBucket === 'wants' ? 'color-mix(in srgb, var(--chart-3) 20%, transparent)' : 'transparent',
+                                color: currentBucket === 'wants' ? 'var(--chart-3)' : 'var(--muted)',
                               }}
                             >
                               🎉 Svago
@@ -1361,9 +1361,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                                 fontWeight: 600,
                                 cursor: 'pointer',
                                 border: '1px solid',
-                                borderColor: currentBucket === 'savings' ? '#34d399' : 'var(--border)',
-                                background: currentBucket === 'savings' ? 'rgba(52, 211, 153, 0.2)' : 'transparent',
-                                color: currentBucket === 'savings' ? '#34d399' : 'var(--muted)',
+                                borderColor: currentBucket === 'savings' ? 'var(--chart-positive)' : 'var(--border)',
+                                background: currentBucket === 'savings' ? 'var(--success-soft)' : 'transparent',
+                                color: currentBucket === 'savings' ? 'var(--chart-positive)' : 'var(--muted)',
                               }}
                             >
                               💰 Risparmio
@@ -1440,8 +1440,8 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               const gradId = `link-grad-${idx}`;
               return (
                 <linearGradient key={gradId} id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor={link.sourceNode?.color || '#10b981'} stopOpacity={0.4} />
-                  <stop offset="100%" stopColor={link.targetNode?.color || '#3b82f6'} stopOpacity={0.4} />
+                  <stop offset="0%" stopColor={link.sourceNode?.color || 'var(--chart-positive)'} />
+                  <stop offset="100%" stopColor={link.targetNode?.color || 'var(--chart-6)'} />
                 </linearGradient>
               );
             })}
@@ -1475,9 +1475,9 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                 key={`link-${idx}`}
                 d={pathData}
                 fill={`url(#link-grad-${idx})`}
-                opacity={isHovered ? 0.85 : 0.45}
                 style={{
-                  transition: 'opacity 0.2s ease, fill 0.2s ease',
+                  fillOpacity: isHovered ? 0.85 : 'var(--chart-flow-opacity)',
+                  transition: 'fill-opacity 0.2s ease, fill 0.2s ease',
                   cursor: 'pointer',
                 }}
                 onMouseEnter={() => {
@@ -1520,7 +1520,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
                   height={node.height}
                   rx={4}
                   fill={node.color}
-                  stroke={isHovered ? '#fff' : 'rgba(255,255,255,0.1)'}
+                  stroke={isHovered ? 'var(--text)' : 'var(--border-strong)'}
                   strokeWidth={isHovered ? 2 : 1}
                   style={{ transition: 'all 0.2s ease' }}
                 />
@@ -1564,7 +1564,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
               background: 'var(--panel-strong)',
               borderRadius: '10px',
               border: '1px solid var(--accent)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+              boxShadow: 'var(--shadow-lg)',
               fontSize: '0.8rem',
               display: 'flex',
               alignItems: 'center',
@@ -1576,7 +1576,7 @@ export const SankeyChart: React.FC<SankeyChartProps> = ({ transactions, budgetCa
             <span style={{ color: 'var(--muted)' }}>
               {hoveredLink.sourceName} ➔ {hoveredLink.targetName}:
             </span>
-            <strong style={{ color: '#38bdf8' }}>{formatEuro(hoveredLink.value)}</strong>
+            <strong style={{ color: 'var(--info)' }}>{formatEuro(hoveredLink.value)}</strong>
             <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
               ({hoveredLink.percent.toFixed(1)}% del totale entrate)
             </span>

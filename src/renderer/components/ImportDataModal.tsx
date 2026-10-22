@@ -153,7 +153,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(2, 8, 23, 0.78)',
+        backgroundColor: 'var(--scrim)',
         backdropFilter: 'blur(8px)',
         zIndex: 9999,
         display: 'flex',
@@ -170,19 +170,19 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
     >
       <div
         style={{
-          background: 'var(--panel-strong, #0f172a)',
-          border: '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+          background: 'var(--panel-strong)',
+          border: '1px solid var(--border)',
           borderRadius: '24px',
           padding: '28px',
           width: '100%',
           maxWidth: parseResult ? '720px' : '580px',
           maxHeight: '90vh',
           overflowY: 'auto',
-          boxShadow: 'var(--shadow, 0 25px 50px -12px rgba(0, 0, 0, 0.5))',
+          boxShadow: 'var(--shadow-lg)',
           display: 'flex',
           flexDirection: 'column',
           gap: '20px',
-          color: 'var(--text, #f8fafc)',
+          color: 'var(--text)',
           transition: 'max-width 0.2s ease',
         }}
         role="dialog"
@@ -204,7 +204,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               <span
                 style={{
                   fontSize: '0.72rem',
-                  color: '#38bdf8',
+                  color: 'var(--info)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.1em',
                   fontWeight: 700,
@@ -212,17 +212,17 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               >
                 Importazione Intelligente Multiformato
               </span>
-              <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '4px 0 0 0', color: 'var(--text, #f8fafc)' }}>
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '4px 0 0 0', color: 'var(--text)' }}>
                 Importa Transazioni ed Estratti Conto
               </h2>
-              <p style={{ margin: '8px 0 0 0', fontSize: '0.85rem', color: 'var(--muted, #94a3b8)', lineHeight: '1.45' }}>
+              <p style={{ margin: '8px 0 0 0', fontSize: '0.85rem', color: 'var(--muted)', lineHeight: '1.45' }}>
                 Carica fogli di calcolo Excel, fogli Apple Numbers, estratti conto PDF o file CSV. Il motore riconosce automaticamente la struttura delle colonne e gli importi anche se non sono nel formato standard.
               </p>
             </div>
 
             {/* Modalità / Profilo di importazione */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text, #f8fafc)' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text)' }}>
                 Modalità di lettura:
               </span>
 
@@ -234,8 +234,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   gap: '12px',
                   padding: '12px 14px',
                   borderRadius: '14px',
-                  border: `1px solid ${importPreset === 'smart' ? '#0ea5e9' : 'var(--border, rgba(148, 163, 184, 0.2))'}`,
-                  background: importPreset === 'smart' ? 'rgba(14, 165, 233, 0.08)' : 'transparent',
+                  border: `1px solid ${importPreset === 'smart' ? 'var(--info)' : 'var(--border)'}`,
+                  background: importPreset === 'smart' ? 'var(--info-soft)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
@@ -246,11 +246,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   name="importPreset"
                   checked={importPreset === 'smart'}
                   onChange={() => setImportPreset('smart')}
-                  style={{ marginTop: '3px', accentColor: '#0ea5e9' }}
+                  style={{ marginTop: '3px', accentColor: 'var(--info)' }}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text, #f8fafc)' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>
                       ⚡ Riconoscimento Intelligente & Flessibile
                     </span>
                     <span
@@ -259,14 +259,14 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         fontWeight: 700,
                         padding: '1px 6px',
                         borderRadius: '4px',
-                        background: '#0ea5e9',
-                        color: '#fff',
+                        background: 'var(--info)',
+                        color: 'var(--on-solid)',
                       }}
                     >
                       CONSIGLIATO
                     </span>
                   </div>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--muted, #94a3b8)', marginTop: '2px', lineHeight: 1.4 }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--muted)', marginTop: '2px', lineHeight: 1.4 }}>
                     Riconosce automaticamente intestazioni, colonne, date e importi in qualsiasi ordine o lingua. Supporta Apple Numbers (.numbers), PDF, Excel e CSV.
                   </span>
                 </div>
@@ -280,8 +280,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   gap: '12px',
                   padding: '10px 14px',
                   borderRadius: '12px',
-                  border: `1px solid ${importPreset === 'template' ? '#0ea5e9' : 'var(--border, rgba(148, 163, 184, 0.2))'}`,
-                  background: importPreset === 'template' ? 'rgba(14, 165, 233, 0.08)' : 'transparent',
+                  border: `1px solid ${importPreset === 'template' ? 'var(--info)' : 'var(--border)'}`,
+                  background: importPreset === 'template' ? 'var(--info-soft)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
@@ -292,13 +292,13 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   name="importPreset"
                   checked={importPreset === 'template'}
                   onChange={() => setImportPreset('template')}
-                  style={{ marginTop: '3px', accentColor: '#0ea5e9' }}
+                  style={{ marginTop: '3px', accentColor: 'var(--info)' }}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text, #f8fafc)' }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text)' }}>
                     Template Standard Excel / CSV
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--muted, #94a3b8)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                     Colonne standard: Data, Tipo, Conto, Beneficiario, Categoria, Prelievo, Deposito.
                   </span>
                 </div>
@@ -312,8 +312,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   gap: '12px',
                   padding: '10px 14px',
                   borderRadius: '12px',
-                  border: `1px solid ${importPreset === 'raiffeisen' ? '#0ea5e9' : 'var(--border, rgba(148, 163, 184, 0.2))'}`,
-                  background: importPreset === 'raiffeisen' ? 'rgba(14, 165, 233, 0.08)' : 'transparent',
+                  border: `1px solid ${importPreset === 'raiffeisen' ? 'var(--info)' : 'var(--border)'}`,
+                  background: importPreset === 'raiffeisen' ? 'var(--info-soft)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
@@ -324,13 +324,13 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   name="importPreset"
                   checked={importPreset === 'raiffeisen'}
                   onChange={() => setImportPreset('raiffeisen')}
-                  style={{ marginTop: '3px', accentColor: '#0ea5e9' }}
+                  style={{ marginTop: '3px', accentColor: 'var(--info)' }}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text, #f8fafc)' }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text)' }}>
                     Raiffeisen Cassa Rurale
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--muted, #94a3b8)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                     Estratto conto con colonne: Valuta beneficiario, Dare, Avere, Descrizione.
                   </span>
                 </div>
@@ -344,8 +344,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   gap: '12px',
                   padding: '10px 14px',
                   borderRadius: '12px',
-                  border: `1px solid ${importPreset === 'nexi' ? '#0ea5e9' : 'var(--border, rgba(148, 163, 184, 0.2))'}`,
-                  background: importPreset === 'nexi' ? 'rgba(14, 165, 233, 0.08)' : 'transparent',
+                  border: `1px solid ${importPreset === 'nexi' ? 'var(--info)' : 'var(--border)'}`,
+                  background: importPreset === 'nexi' ? 'var(--info-soft)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                 }}
@@ -356,13 +356,13 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   name="importPreset"
                   checked={importPreset === 'nexi'}
                   onChange={() => setImportPreset('nexi')}
-                  style={{ marginTop: '3px', accentColor: '#0ea5e9' }}
+                  style={{ marginTop: '3px', accentColor: 'var(--info)' }}
                 />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text, #f8fafc)' }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text)' }}>
                     Estratto Conto Nexi
                   </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--muted, #94a3b8)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                     Lista movimenti carta con: Data, Categorie, Descrizione, Importo.
                   </span>
                 </div>
@@ -376,8 +376,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               onDragLeave={handleDragLeave}
               onClick={() => fileInputRef.current?.click()}
               style={{
-                border: `2px dashed ${isDragging ? '#38bdf8' : 'var(--border, rgba(148, 163, 184, 0.3))'}`,
-                background: isDragging ? 'rgba(56, 189, 248, 0.08)' : 'var(--overlay-subtle, rgba(255, 255, 255, 0.02))',
+                border: `2px dashed ${isDragging ? 'var(--info)' : 'var(--border-strong)'}`,
+                background: isDragging ? 'var(--info-soft)' : 'var(--overlay-subtle)',
                 borderRadius: '18px',
                 padding: '24px 20px',
                 textAlign: 'center',
@@ -391,26 +391,26 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             >
               <div style={{ fontSize: '2.2rem' }}>📂</div>
               <div>
-                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text, #f8fafc)' }}>
+                <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>
                   Trascina qui il file oppure clicca per sfogliare
                 </span>
-                <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--muted, #94a3b8)' }}>
+                <p style={{ margin: '4px 0 0', fontSize: '0.78rem', color: 'var(--muted)' }}>
                   Formati supportati: Excel, Apple Numbers, PDF estratti conto, CSV
                 </p>
               </div>
 
               {/* Badge dei formati supportati */}
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '4px' }}>
-                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'var(--success-soft)', color: 'var(--success)', fontWeight: 600 }}>
                   📊 Excel (.xlsx, .xls)
                 </span>
-                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(249, 115, 22, 0.15)', color: '#fb923c', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'var(--warning-soft)', color: 'var(--warning)', fontWeight: 600 }}>
                   🍎 Apple Numbers (.numbers)
                 </span>
-                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'var(--danger-soft)', color: 'var(--danger)', fontWeight: 600 }}>
                   📄 PDF Bancario (.pdf)
                 </span>
-                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '6px', background: 'var(--info-soft)', color: 'var(--info)', fontWeight: 600 }}>
                   📝 CSV (.csv, .tsv)
                 </span>
               </div>
@@ -419,12 +419,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             {errorMessage && (
               <div
                 style={{
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  background: 'var(--danger-soft)',
+                  border: '1px solid var(--danger-border)',
                   borderRadius: '12px',
                   padding: '12px 14px',
                   fontSize: '0.82rem',
-                  color: '#f87171',
+                  color: 'var(--danger)',
                 }}
               >
                 ⚠️ {errorMessage}
@@ -457,10 +457,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
           <div style={{ textAlign: 'center', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
             <div style={{ fontSize: '3rem', animation: 'spin 1.5s infinite linear' }}>⏳</div>
             <div>
-              <h3 style={{ margin: '0 0 6px', fontSize: '1.25rem', color: 'var(--text, #f8fafc)' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: '1.25rem', color: 'var(--text)' }}>
                 Analisi intelligente del file in corso...
               </h3>
-              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted, #94a3b8)' }}>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--muted)' }}>
                 Rilevamento automatico di intestazioni, date, causali ed importi.
               </p>
             </div>
@@ -477,7 +477,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                     width: '46px',
                     height: '46px',
                     borderRadius: '14px',
-                    background: 'rgba(56, 189, 248, 0.15)',
+                    background: 'var(--info-soft)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -488,7 +488,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                 </div>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text, #f8fafc)' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text)' }}>
                       Anteprima Importazione
                     </h3>
                     <span
@@ -497,15 +497,15 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         fontWeight: 700,
                         padding: '2px 8px',
                         borderRadius: '100px',
-                        background: '#10b981',
-                        color: '#fff',
+                        background: 'var(--success)',
+                        color: 'var(--on-solid)',
                       }}
                     >
                       {parseResult.transactions.length} movimenti trovati
                     </span>
                   </div>
-                  <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: 'var(--muted, #94a3b8)' }}>
-                    File: <strong style={{ color: 'var(--text, #f8fafc)' }}>{currentFile?.name}</strong> • {parseResult.detectedFormatName}
+                  <p style={{ margin: '3px 0 0', fontSize: '0.8rem', color: 'var(--muted)' }}>
+                    File: <strong style={{ color: 'var(--text)' }}>{currentFile?.name}</strong> • {parseResult.detectedFormatName}
                   </p>
                 </div>
               </div>
@@ -526,8 +526,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             {/* Configurazione Conto di destinazione */}
             <div
               style={{
-                background: 'var(--overlay-subtle, rgba(255, 255, 255, 0.03))',
-                border: '1px solid var(--border, rgba(148, 163, 184, 0.15))',
+                background: 'var(--overlay-subtle)',
+                border: '1px solid var(--border)',
                 borderRadius: '14px',
                 padding: '14px',
                 display: 'flex',
@@ -536,7 +536,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text, #f8fafc)' }}>
+                <span style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--text)' }}>
                   Assegna le transazioni al conto:
                 </span>
                 <select
@@ -545,9 +545,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   style={{
                     padding: '6px 12px',
                     borderRadius: '8px',
-                    border: '1px solid var(--border, rgba(148, 163, 184, 0.3))',
-                    background: 'var(--input-bg, #1e293b)',
-                    color: 'var(--text, #f8fafc)',
+                    border: '1px solid var(--border-strong)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text)',
                     fontSize: '0.84rem',
                     cursor: 'pointer',
                   }}
@@ -571,9 +571,9 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   style={{
                     padding: '8px 12px',
                     borderRadius: '8px',
-                    border: '1px solid var(--border, rgba(148, 163, 184, 0.3))',
-                    background: 'var(--input-bg, #1e293b)',
-                    color: 'var(--text, #f8fafc)',
+                    border: '1px solid var(--border-strong)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text)',
                     fontSize: '0.84rem',
                   }}
                 />
@@ -583,11 +583,11 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             {/* Tabella di Anteprima dei primi 5 movimenti */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted, #94a3b8)' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--muted)' }}>
                   Primi movimenti rilevati (Anteprima):
                 </span>
                 {parseResult.transactions.length > 5 && (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--muted, #94a3b8)' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
                     Mostrati 5 di {parseResult.transactions.length}
                   </span>
                 )}
@@ -595,19 +595,19 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
 
               <div
                 style={{
-                  border: '1px solid var(--border, rgba(148, 163, 184, 0.2))',
+                  border: '1px solid var(--border)',
                   borderRadius: '12px',
                   overflow: 'hidden',
-                  background: 'var(--overlay-subtle, rgba(255, 255, 255, 0.02))',
+                  background: 'var(--overlay-subtle)',
                 }}
               >
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                   <thead>
-                    <tr style={{ background: 'rgba(255, 255, 255, 0.05)', textAlign: 'left', borderBottom: '1px solid var(--border, rgba(148, 163, 184, 0.15))' }}>
-                      <th style={{ padding: '8px 12px', color: 'var(--muted, #94a3b8)', fontWeight: 600 }}>Data</th>
-                      <th style={{ padding: '8px 12px', color: 'var(--muted, #94a3b8)', fontWeight: 600 }}>Descrizione</th>
-                      <th style={{ padding: '8px 12px', color: 'var(--muted, #94a3b8)', fontWeight: 600 }}>Categoria Stima</th>
-                      <th style={{ padding: '8px 12px', color: 'var(--muted, #94a3b8)', fontWeight: 600, textAlign: 'right' }}>Importo</th>
+                    <tr style={{ background: 'var(--overlay-medium)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '8px 12px', color: 'var(--muted)', fontWeight: 600 }}>Data</th>
+                      <th style={{ padding: '8px 12px', color: 'var(--muted)', fontWeight: 600 }}>Descrizione</th>
+                      <th style={{ padding: '8px 12px', color: 'var(--muted)', fontWeight: 600 }}>Categoria Stima</th>
+                      <th style={{ padding: '8px 12px', color: 'var(--muted)', fontWeight: 600, textAlign: 'right' }}>Importo</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -617,10 +617,10 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                         <tr
                           key={tx.id || idx}
                           style={{
-                            borderBottom: idx < 4 ? '1px solid var(--border, rgba(148, 163, 184, 0.08))' : 'none',
+                            borderBottom: idx < 4 ? '1px solid var(--divider)' : 'none',
                           }}
                         >
-                          <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', color: 'var(--text, #f8fafc)' }}>
+                          <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', color: 'var(--text)' }}>
                             {tx.date}
                           </td>
                           <td
@@ -630,19 +630,19 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
-                              color: 'var(--text, #f8fafc)',
+                              color: 'var(--text)',
                               fontWeight: 500,
                             }}
                             title={tx.merchant}
                           >
                             {tx.merchant}
                           </td>
-                          <td style={{ padding: '8px 12px', color: 'var(--muted, #94a3b8)' }}>
+                          <td style={{ padding: '8px 12px', color: 'var(--muted)' }}>
                             <span
                               style={{
                                 padding: '2px 8px',
                                 borderRadius: '100px',
-                                background: 'rgba(255, 255, 255, 0.06)',
+                                background: 'var(--overlay-strong)',
                                 fontSize: '0.74rem',
                               }}
                             >
@@ -655,7 +655,7 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                               textAlign: 'right',
                               fontWeight: 700,
                               whiteSpace: 'nowrap',
-                              color: isIncome ? '#34d399' : '#f87171',
+                              color: isIncome ? 'var(--chart-positive)' : 'var(--chart-negative)',
                             }}
                           >
                             {isIncome ? '+' : '-'}€{Math.abs(tx.amount).toFixed(2)}
@@ -672,12 +672,12 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
             {parseResult.assets && parseResult.assets.length > 0 && (
               <div
                 style={{
-                  background: 'rgba(56, 189, 248, 0.08)',
-                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                  background: 'var(--info-soft)',
+                  border: '1px solid var(--info-border)',
                   borderRadius: '12px',
                   padding: '10px 14px',
                   fontSize: '0.8rem',
-                  color: '#38bdf8',
+                  color: 'var(--info)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
@@ -710,8 +710,8 @@ export const ImportDataModal: React.FC<ImportDataModalProps> = ({
                   fontWeight: 700,
                   fontSize: '0.9rem',
                   cursor: 'pointer',
-                  background: 'linear-gradient(135deg, #0ea5e9, #0284c7)',
-                  boxShadow: '0 4px 14px rgba(14, 165, 233, 0.35)',
+                  background: 'linear-gradient(135deg, var(--info), var(--chart-6))',
+                  boxShadow: 'var(--shadow-accent)',
                 }}
               >
                 Conferma e Importa ({parseResult.transactions.length}) ✨

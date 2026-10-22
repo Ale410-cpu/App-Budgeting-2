@@ -5,6 +5,12 @@ const http = require('http');
 const crypto = require('crypto');
 const child_process = require('child_process');
 const { app, BrowserWindow, ipcMain, nativeImage, shell, session, dialog, screen, Notification } = require('electron');
+const {
+  showNativeNotification,
+  probeNativeNotification,
+  APP_BUNDLE_ID,
+  APP_DISPLAY_NAME,
+} = require('./notifications.cjs');
 
 // Enable GPU hardware acceleration and smooth compositing for macOS Metal & 60/120Hz displays
 app.commandLine.appendSwitch('enable-gpu-rasterization');
@@ -13,7 +19,7 @@ app.commandLine.appendSwitch('enable-zero-copy');
 // Ensure consistent application name and AppUserModelId for notifications across sessions
 app.setName('BudgetingMacApp');
 if (process.platform === 'win32' || process.platform === 'darwin') {
-  app.setAppUserModelId('com.budgeting.macapp');
+  app.setAppUserModelId(APP_BUNDLE_ID);
 }
 
 const devServerUrl = 'http://127.0.0.1:3000';
@@ -43,6 +49,57 @@ if (!gotTheLock) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+  });
+}
+
+/**
+ * QA helper: `BudgetingMacApp --test-notification` posts a real macOS system
+ * notification and exits. Useful to verify that the packaged build is able to
+ * reach Notification Center without opening the UI.
+ */
+const isNotificationSmokeTest = process.argv.includes('--test-notification');
+if (isNotificationSmokeTest) {
+  app.whenReady().then(async () => {
+    const result = await showNativeNotification(Notification, {
+      title: 'BudgetingMacApp',
+      body: 'Notifica di prova — il canale di sistema funziona.',
+      tag: 'smoke-test',
+    });
+    const report = `[smoke-test] ${new Date().toISOString()} ${JSON.stringify(result)}`;
+    console.log(report);
+    try {
+      require('fs').writeFileSync(require('os').tmpdir() + '/budget-notification-smoke.log', report + '\n');
+    } catch {
+      /* ignore */
+    }
+    setTimeout(() => app.quit(), 1500);
+  });
+}
+
+/**
+ * QA helper: `BudgetingMacApp --test-window-close` closes the window and
+ * reports whether the app stays alive in the Dock (expected on macOS).
+ */
+const isWindowCloseSmokeTest = process.argv.includes('--test-window-close');
+if (isWindowCloseSmokeTest) {
+  app.whenReady().then(() => {
+    createWindow();
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      setTimeout(() => {
+        const alive = app.isReady();
+        const report = `[window-close-test] ${new Date().toISOString()} alive=${alive} dockVisible=${
+          app.dock ? app.dock.getBadge() !== undefined : 'n/a'
+        }`;
+        console.log(report);
+        try {
+          require('fs').writeFileSync(require('os').tmpdir() + '/budget-window-close-smoke.log', report + '\n');
+        } catch {
+          /* ignore */
+        }
+        setTimeout(() => app.quit(), 800);
+      }, 2000);
+    }, 2500);
   });
 }
 
@@ -265,12 +322,19 @@ function validateIpcSender(event) {
   }
 }
 
+/**
+ * Resolves the app icon for runtime use (Dock tile, window icon).
+ *
+ * In a packaged build macOS reads `Contents/Resources/icon.icns` on its own:
+ * overriding it with a raster image is what makes the Dock tile look smaller
+ * than the one of every other app. The PNG is therefore only used while
+ * developing (`npm run dev`), where there is no bundle to read it from.
+ */
 function getAppIcon() {
   const possiblePaths = [
     path.join(__dirname, 'icon.png'),
     path.join(__dirname, '../build/icon.png'),
     path.join(__dirname, '../public/icon.png'),
-    path.join(__dirname, '../src/renderer/assets/icon.png'),
     path.join(process.resourcesPath || '', 'build/icon.png'),
     path.join(process.resourcesPath || '', 'icon.png'),
   ];
@@ -573,6 +637,32 @@ function findBestDataFile() {
 
 let lastWrittenHash = '';
 
+/**
+ * Impronta del contenuto *significativo* di un payload.
+ *
+ * Il payload contiene dei timestamp (`exportedAt`, `_fileMeta.updatedAt`) che
+ * cambiano a ogni salvataggio: senza escluderli ogni scrittura produrrebbe
+ * un file diverso, l'iCloud Drive lo sincronizzerebbe e l'altra piattaforma
+ * ricaricherebbe... triggering un ciclo di riscritture. Con l'impronta
+ * semantica si scrive solo quando i dati sono davvero diversi.
+ */
+function semanticHashOf(payload) {
+  try {
+    const stable = { ...payload };
+    delete stable.exportedAt;
+    if (stable._fileMeta && typeof stable._fileMeta === 'object') {
+      stable._fileMeta = { ...stable._fileMeta };
+      delete stable._fileMeta.updatedAt;
+    }
+    return crypto.createHash('md5').update(JSON.stringify(stable)).digest('hex');
+  } catch {
+    return '';
+  }
+}
+
+/// Ultima impronta semantica scritta sul file principale.
+let lastSemanticHash = '';
+
 async function safeWriteJson(targetPath, data, primaryReferencePath = null) {
   isWritingData = true;
   const dir = path.dirname(targetPath);
@@ -647,6 +737,9 @@ function setupDataFileWatcher(filePath) {
       // If content is identical to what we just wrote, ignore to avoid re-render loops
       if (incomingHash === lastWrittenHash) return;
       lastWrittenHash = incomingHash;
+      // Il contenuto e' cambiato dall'esterno: la prossima scrittura deve
+      // avvenire (e non essere scartata come duplicata).
+      lastSemanticHash = '';
 
       const parsed = JSON.parse(content);
 
@@ -910,14 +1003,19 @@ app.whenReady().then(() => {
   setupDataFileWatcher(activeDataFilePath);
 
   if (process.platform === 'darwin' && app.dock) {
-    try {
-      if (appIconInfo.image && !appIconInfo.image.isEmpty()) {
-        app.dock.setIcon(appIconInfo.image);
-      } else if (appIconPath && fs.existsSync(appIconPath)) {
-        app.dock.setIcon(appIconPath);
+    // Packaged builds: macOS picks the icon up from the bundle (.icns), so the
+    // Dock tile keeps the exact same size as every other app. Overriding it
+    // here with a raster image is what makes the icon look smaller/off-grid.
+    if (!app.isPackaged) {
+      try {
+        if (appIconInfo.image && !appIconInfo.image.isEmpty()) {
+          app.dock.setIcon(appIconInfo.image);
+        } else if (appIconPath && fs.existsSync(appIconPath)) {
+          app.dock.setIcon(appIconPath);
+        }
+      } catch (err) {
+        console.error('Failed to set dock icon:', err);
       }
-    } catch (err) {
-      console.error('Failed to set dock icon:', err);
     }
   }
 
@@ -941,18 +1039,29 @@ app.whenReady().then(() => {
     });
   }
 
+  if (isNotificationSmokeTest || isWindowCloseSmokeTest) return;
+
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      return;
     }
+    // Clicking a system notification (or the dock icon) must bring the app forward
+    focusMainWindow();
   });
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
+    return;
+  }
+  // macOS: the app stays alive in the Dock when the window is closed, so the
+  // icon remains visible and clicking it re-opens the window.
+  if (app.dock && typeof app.dock.show === 'function') {
+    app.dock.show();
   }
 });
 
@@ -1032,6 +1141,14 @@ ipcMain.handle('app:save-data', async (event, data) => {
       } catch {}
     }
 
+    // Se il contenuto non e' cambiato, non riscrivere: evita conflitti con
+    // l'altra piattaforma quando il file e' condiviso su iCloud Drive.
+    const semanticHash = semanticHashOf(data);
+    if (semanticHash && semanticHash === lastSemanticHash && fs.existsSync(activeDataFilePath)) {
+      return { success: true, filePath: activeDataFilePath };
+    }
+    lastSemanticHash = semanticHash;
+
     // 2. Write to the active primary path LAST and lock it as primary
     await safeWriteJson(activeDataFilePath, data, activeDataFilePath);
     recordPrimaryDataPath(activeDataFilePath, Boolean(recordedInfo?.isCustomPrimary));
@@ -1102,6 +1219,122 @@ ipcMain.handle('app:get-data-file-info', async (event) => {
     };
   }
 });
+
+ipcMain.handle('app:scan-receipt', async (event) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Scegli la foto dello scontrino',
+      buttonLabel: 'Riconosci',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Immagini', extensions: ['png', 'jpg', 'jpeg', 'heic', 'heif', 'webp', 'tiff', 'tif', 'bmp'] },
+        { name: 'Tutti i file', extensions: ['*'] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    const text = await runReceiptOcr(result.filePaths[0]);
+
+    if (!text || !text.trim()) {
+      return { success: false, error: 'Nessun testo riconosciuto nella foto dello scontrino.' };
+    }
+
+    return { success: true, text, source: 'vision' };
+  } catch (error) {
+    console.error('Errore durante la scansione dello scontrino:', error);
+    return { success: false, error: error?.message || 'Riconoscimento non riuscito.' };
+  }
+});
+
+/**
+ * Motore OCR: il binario `receipt-ocr` (compilato da `npm run build:ocr`)
+ * usa il framework Vision di macOS. Se il binario non c'e', prova a
+ * compilarlo al volo; se impossibile, lo dice con un messaggio chiaro.
+ */
+function resolveOcrBinary() {
+  const candidates = [];
+
+  if (app.isPackaged && process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'bin', 'receipt-ocr'));
+  }
+  candidates.push(path.join(__dirname, 'bin', 'receipt-ocr'));
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function compileOcrBinary() {
+  const scriptPath = path.join(__dirname, '..', 'scripts', 'receipt-ocr.swift');
+  const enginePath = path.join(__dirname, '..', 'ios', 'BudgetApp', 'Bridge', 'ReceiptOCR.swift');
+  if (!fs.existsSync(scriptPath)) return null;
+
+  // Il comando e il motore condiviso con iOS vengono compilati insieme.
+  const sources = [scriptPath];
+  if (fs.existsSync(enginePath)) sources.push(enginePath);
+
+  const targetPath = path.join(app.getPath('userData'), 'receipt-ocr');
+  const combinedPath = path.join(app.getPath('userData'), 'receipt-ocr-build.swift');
+
+  try {
+    fs.writeFileSync(combinedPath, sources.map((file) => fs.readFileSync(file, 'utf-8')).join('\n'));
+    child_process.execFileSync('swiftc', ['-O', combinedPath, '-o', targetPath], {
+      stdio: 'ignore',
+      timeout: 180000,
+    });
+  } catch (error) {
+    console.error('Compilazione del motore OCR non riuscita:', error?.message || error);
+    return null;
+  } finally {
+    try {
+      fs.unlinkSync(combinedPath);
+    } catch {}
+  }
+
+  return fs.existsSync(targetPath) ? targetPath : null;
+}
+
+/**
+ * Esegue il motore OCR. Usa la API asincrona: il riconoscimento (che al
+ * primo avvio può richiedere qualche secondo per caricare i modelli di
+ * Vision) non deve bloccare il processo principale e congelare l'interfaccia.
+ */
+async function runReceiptOcr(imagePath) {
+  const binary = resolveOcrBinary() || compileOcrBinary();
+
+  if (!binary) {
+    throw new Error(
+      "Motore OCR non disponibile: installa gli Xcode Command Line Tools (per swiftc) e ricostruisci l'app, oppure usa la versione iOS."
+    );
+  }
+
+  const stdout = await new Promise((resolve, reject) => {
+    child_process.execFile(
+      binary,
+      [imagePath],
+      { encoding: 'utf-8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr?.trim() || error.message));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+  });
+
+  try {
+    const parsed = JSON.parse(stdout);
+    return parsed.text || '';
+  } catch {
+    return stdout;
+  }
+}
 
 ipcMain.handle('app:select-data-file', async (event) => {
   if (!validateIpcSender(event)) {
@@ -1215,6 +1448,60 @@ ipcMain.handle('app:choose-save-data-location', async (event, currentData, start
     return {
       success: false,
       error: `Impossibile salvare nella posizione scelta: ${error?.message || 'errore di scrittura'}`,
+    };
+  }
+});
+
+/**
+ * Collega un file user-data.json ESISTENTE (per esempio su iCloud Drive)
+ * come posizione principale, senza sovrascriverlo.
+ *
+ * E' il flusso simmetrico a quello iOS e permette a Mac e iPhone di usare
+ * lo stesso file: le modifiche vengono sincronizzate da iCloud Drive.
+ */
+ipcMain.handle('app:link-primary-file', async (event) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  const icloudRoot = getICloudDriveRoot();
+  const startDir =
+    activeDataFilePath && fs.existsSync(path.dirname(activeDataFilePath))
+      ? path.dirname(activeDataFilePath)
+      : icloudRoot && fs.existsSync(icloudRoot)
+        ? icloudRoot
+        : getPrimaryDocumentsDir();
+
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Collega user-data.json esistente (es. su iCloud Drive)',
+    defaultPath: startDir,
+    buttonLabel: 'Collega',
+    properties: ['openFile'],
+    filters: [{ name: 'File Dati Budget (JSON)', extensions: ['json'] }],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, canceled: true };
+  }
+
+  const chosenPath = result.filePaths[0];
+
+  try {
+    const existing = readValidBudgetJsonFile(chosenPath);
+
+    switchActiveDataFile(chosenPath, false, true);
+
+    return {
+      success: true,
+      filePath: chosenPath,
+      displayLocation: formatFriendlyDataLocation(chosenPath),
+      isICloud: isICloudPath(chosenPath),
+      data: existing && existing.parsed ? existing.parsed : null,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Impossibile collegare il file scelto: ${error?.message || 'errore'}`,
     };
   }
 });
@@ -1848,49 +2135,79 @@ ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, a
   }
 });
 
-ipcMain.handle('app:send-notification', async (event, { title, body, icon, silent }) => {
+/**
+ * Focuses the main window — used when the user clicks a system notification.
+ */
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+  if (process.platform === 'darwin' && app.dock && typeof app.dock.show === 'function') {
+    app.dock.show();
+  }
+}
+
+ipcMain.handle('app:send-notification', async (event, payload = {}) => {
+  if (!validateIpcSender(event)) {
+    throw new Error('Unauthorized IPC sender');
+  }
+
+  const { title, body, icon, silent, tag } = payload;
+
+  try {
+    const result = await showNativeNotification(Notification, {
+      title,
+      body,
+      icon,
+      silent,
+      tag,
+      onClick: focusMainWindow,
+    });
+
+    if (result.delivered) {
+      return { success: true, channel: result.channel, reason: result.reason };
+    }
+
+    return {
+      success: false,
+      channel: result.channel,
+      reason: result.reason || 'System notifications could not be delivered',
+    };
+  } catch (err) {
+    console.error('Failed to trigger macOS notification:', err);
+    return { success: false, channel: 'none', error: err?.message || String(err) };
+  }
+});
+
+/**
+ * Reports which notification channel is usable, so the UI can explain the
+ * current state (e.g. "the app is not signed, using the compatibility channel").
+ */
+ipcMain.handle('app:notification-capability', async (event) => {
   if (!validateIpcSender(event)) {
     throw new Error('Unauthorized IPC sender');
   }
 
   try {
-    if (Notification && Notification.isSupported && Notification.isSupported()) {
-      let iconPath = icon;
-      if (!iconPath) {
-        const possibleIcons = [
-          path.join(__dirname, 'icon.png'),
-          path.join(__dirname, '..', 'build', 'icon.png'),
-          path.join(__dirname, '..', 'public', 'icon-192.png'),
-          path.join(__dirname, '..', 'public', 'icon.png'),
-        ];
-        for (const p of possibleIcons) {
-          if (fs.existsSync(p)) {
-            iconPath = p;
-            break;
-          }
-        }
-      }
-
-      const notification = new Notification({
-        title: title || 'Registro Budget',
-        body: body || '',
-        icon: iconPath && fs.existsSync(iconPath) ? iconPath : undefined,
-        silent: Boolean(silent),
-      });
-
-      notification.on('click', () => {
-        if (mainWindow) {
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.focus();
-        }
-      });
-
-      notification.show();
-      return { success: true };
-    }
-    return { success: false, reason: 'System notifications not supported or disabled' };
+    const probe = await probeNativeNotification(Notification);
+    return {
+      supported: probe.supported,
+      channel: probe.channel,
+      bundleId: probe.bundleId,
+      appName: APP_DISPLAY_NAME,
+      platform: process.platform,
+      signed: app.isSigned,
+    };
   } catch (err) {
-    console.error('Failed to trigger macOS notification:', err);
-    return { success: false, error: err?.message || String(err) };
+    console.error('Failed to probe notification capability:', err);
+    return {
+      supported: false,
+      channel: 'none',
+      bundleId: APP_BUNDLE_ID,
+      appName: APP_DISPLAY_NAME,
+      platform: process.platform,
+      error: err?.message || String(err),
+    };
   }
 });

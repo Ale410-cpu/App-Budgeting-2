@@ -48,12 +48,12 @@ const DEFAULT_MACRO_TARGETS: Record<string, number> = {
 };
 
 const MACRO_COLORS: Record<string, string> = {
-  'Azioni': '#3b82f6',        // Blue for Equity & Equity ETFs
-  'Obbligazioni': '#10b981',  // Emerald for Bonds & Bond ETFs
-  'Liquidità': '#06b6d4',    // Cyan for Cash & Liquidity
-  'Cripto': '#f59e0b',        // Amber for Crypto
-  'Immobili': '#ec4899',      // Pink for Real Estate
-  'Altro': '#8b5cf6',         // Violet for Other
+  'Azioni': 'var(--chart-6)',        // Blue for Equity & Equity ETFs
+  'Obbligazioni': 'var(--chart-7)',  // Emerald for Bonds & Bond ETFs
+  'Liquidità': 'var(--chart-2)',    // Cyan for Cash & Liquidity
+  'Cripto': 'var(--chart-4)',        // Amber for Crypto
+  'Immobili': 'var(--chart-5)',      // Pink for Real Estate
+  'Altro': 'var(--chart-3)',         // Violet for Other
 };
 
 export function isAssetBondEtf(asset: Asset): boolean {
@@ -275,15 +275,15 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
 
     // Detailed view items (splitting ETF Azionari vs ETF Obbligazionari vs Azioni vs Obbligazioni)
     const detailedItems = [
-      { name: 'ETF Azionari', val: valEtfAzionari, color: '#38bdf8', category: 'Azioni' },
-      { name: 'Azioni Singole', val: valAzioniDirect, color: '#6366f1', category: 'Azioni' },
-      { name: 'ETF Obbligazionari', val: valEtfObbligazionari, color: '#10b981', category: 'Obbligazioni' },
-      { name: 'Obbligazioni Singole', val: valObbligazioniDirect, color: '#34d399', category: 'Obbligazioni' },
-      { name: 'Liquidità Conti', val: cashConti, color: '#06b6d4', category: 'Liquidità' },
-      { name: 'Titoli Liquidità / Depositi', val: valLiquiditaAssets, color: '#67e8f9', category: 'Liquidità' },
-      { name: 'Criptovalute', val: valCripto, color: '#f59e0b', category: 'Cripto' },
-      { name: 'Proprietà / Immobili', val: valImmobili, color: '#ec4899', category: 'Immobili' },
-      { name: 'Altro / Fondi', val: valAltro, color: '#8b5cf6', category: 'Altro' },
+      { name: 'ETF Azionari', val: valEtfAzionari, color: 'var(--chart-2)', category: 'Azioni' },
+      { name: 'Azioni Singole', val: valAzioniDirect, color: 'var(--chart-6)', category: 'Azioni' },
+      { name: 'ETF Obbligazionari', val: valEtfObbligazionari, color: 'var(--chart-7)', category: 'Obbligazioni' },
+      { name: 'Obbligazioni Singole', val: valObbligazioniDirect, color: 'var(--chart-positive)', category: 'Obbligazioni' },
+      { name: 'Liquidità Conti', val: cashConti, color: 'var(--chart-2)', category: 'Liquidità' },
+      { name: 'Titoli Liquidità / Depositi', val: valLiquiditaAssets, color: 'var(--chart-2)', category: 'Liquidità' },
+      { name: 'Criptovalute', val: valCripto, color: 'var(--chart-4)', category: 'Cripto' },
+      { name: 'Proprietà / Immobili', val: valImmobili, color: 'var(--chart-5)', category: 'Immobili' },
+      { name: 'Altro / Fondi', val: valAltro, color: 'var(--chart-3)', category: 'Altro' },
     ].filter((item) => item.val > 0)
      .map((item) => ({
        ...item,
@@ -318,7 +318,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
         name: a.name,
         ticker: a.ticker,
         macroClass,
-        color: MACRO_COLORS[macroClass] || '#8b5cf6',
+        color: MACRO_COLORS[macroClass] || 'var(--chart-3)',
         qty,
         currentPrice,
         val,
@@ -475,7 +475,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   background: viewMode === 'macro' ? 'var(--input-bg)' : 'transparent',
                   color: viewMode === 'macro' ? 'var(--text)' : 'var(--muted)',
                   fontWeight: viewMode === 'macro' ? 700 : 500,
-                  boxShadow: viewMode === 'macro' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  boxShadow: viewMode === 'macro' ? 'var(--shadow-xs)' : 'none',
                 }}
               >
                 📊 Vista Macro-Classi
@@ -490,7 +490,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   background: viewMode === 'detailed' ? 'var(--input-bg)' : 'transparent',
                   color: viewMode === 'detailed' ? 'var(--text)' : 'var(--muted)',
                   fontWeight: viewMode === 'detailed' ? 700 : 500,
-                  boxShadow: viewMode === 'detailed' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  boxShadow: viewMode === 'detailed' ? 'var(--shadow-xs)' : 'none',
                 }}
               >
                 🔍 Vista per Strumento
@@ -534,7 +534,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
 
         {/* Warning or indicator if targets don't sum to 100% */}
         {totalTargetPercent !== 100 && (
-          <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#f59e0b', fontSize: '0.78rem', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '8px 14px', borderRadius: '8px', background: 'var(--warning-soft)', border: '1px solid var(--warning-border)', color: 'var(--warning)', fontSize: '0.78rem', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>⚠️ La somma dei pesi target è attualmente del <strong>{totalTargetPercent}%</strong> (dovrebbe essere esattamente 100%).</span>
             {isEditingTargets && (
               <button
@@ -543,7 +543,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                 onClick={() => {
                   setTempTargets({ 'Azioni': 60, 'Obbligazioni': 30, 'Liquidità': 10 });
                 }}
-                style={{ fontSize: '0.75rem', color: '#f59e0b', textDecoration: 'underline' }}
+                style={{ fontSize: '0.75rem', color: 'var(--warning)', textDecoration: 'underline' }}
               >
                 Reimposta 60/30/10
               </button>
@@ -659,7 +659,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                           {formatEuro(item.targetVal)}
                         </td>
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                          <span style={{ color: isUnder ? '#38bdf8' : isOver ? '#fb7185' : '#10b981', fontWeight: 700 }}>
+                          <span style={{ color: isUnder ? 'var(--info)' : isOver ? 'var(--danger)' : 'var(--success)', fontWeight: 700 }}>
                             {item.deltaVal > 0 ? `+${formatEuro(item.deltaVal)}` : formatEuro(item.deltaVal)}
                           </span>
                         </td>
@@ -670,8 +670,8 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                               padding: '3px 10px',
                               borderRadius: '999px',
                               fontWeight: 700,
-                              background: isUnder ? 'rgba(56, 189, 248, 0.15)' : isOver ? 'rgba(251, 113, 133, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              color: isUnder ? '#38bdf8' : isOver ? '#fb7185' : '#10b981',
+                              background: isUnder ? 'var(--info-soft)' : isOver ? 'var(--danger-soft)' : 'var(--success-soft)',
+                              color: isUnder ? 'var(--info)' : isOver ? 'var(--danger)' : 'var(--success)',
                             }}
                           >
                             {isUnder ? '🛒 Da Incrementare' : isOver ? '⚠️ Sovrappesato' : '✓ In Target'}
@@ -721,7 +721,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   <th style={{ textAlign: 'right' }}>Quotazione</th>
                   <th style={{ textAlign: 'right' }}>Valore Attuale</th>
                   <th style={{ textAlign: 'right' }}>% Portafoglio</th>
-                  <th style={{ textAlign: 'right', color: '#38bdf8' }}>Rendimento % (ROI)</th>
+                  <th style={{ textAlign: 'right', color: 'var(--info)' }}>Rendimento % (ROI)</th>
                 </tr>
               </thead>
               <tbody>
@@ -733,7 +733,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                         <div>
                           <strong style={{ fontSize: '0.85rem' }}>{item.name}</strong>
                           {item.ticker && (
-                            <span style={{ marginLeft: '6px', fontSize: '0.68rem', padding: '1px 5px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8' }}>
+                            <span style={{ marginLeft: '6px', fontSize: '0.68rem', padding: '1px 5px', borderRadius: '4px', background: 'var(--info-soft)', color: 'var(--info)' }}>
                               {item.ticker.toUpperCase()}
                             </span>
                           )}
@@ -772,7 +772,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                           style={{
                             fontWeight: 700,
                             fontSize: '0.84rem',
-                            color: item.perf.roiPercent > 0 ? '#10b981' : item.perf.roiPercent < 0 ? '#f43f5e' : 'var(--muted)',
+                            color: item.perf.roiPercent > 0 ? 'var(--success)' : item.perf.roiPercent < 0 ? 'var(--danger)' : 'var(--muted)',
                           }}
                         >
                           {item.perf.roiPercent > 0 ? '▲ +' : item.perf.roiPercent < 0 ? '▼ ' : ''}
@@ -781,7 +781,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                         <span
                           style={{
                             fontSize: '0.68rem',
-                            color: item.perf.pnlEuro > 0 ? '#10b981' : item.perf.pnlEuro < 0 ? '#f43f5e' : 'var(--muted)',
+                            color: item.perf.pnlEuro > 0 ? 'var(--success)' : item.perf.pnlEuro < 0 ? 'var(--danger)' : 'var(--muted)',
                             opacity: 0.85,
                           }}
                         >
@@ -822,8 +822,8 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   alignItems: 'center',
                   padding: '8px 12px',
                   borderRadius: '10px',
-                  background: 'rgba(59, 130, 246, 0.08)',
-                  border: '1px solid rgba(59, 130, 246, 0.25)',
+                  background: 'var(--info-soft)',
+                  border: '1px solid var(--info-border)',
                 }}
               >
                 <div>
@@ -831,7 +831,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                     <span style={{ fontSize: '0.85rem' }}>📈</span>
                     <strong style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{etf.name}</strong>
                   </div>
-                  <span style={{ fontSize: '0.7rem', color: '#3b82f6', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--chart-6)', fontWeight: 600 }}>
                     ETF Azionario · {formatEuro(etf.val)} (conta in Azioni)
                   </span>
                 </div>
@@ -858,8 +858,8 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   alignItems: 'center',
                   padding: '8px 12px',
                   borderRadius: '10px',
-                  background: 'rgba(16, 185, 129, 0.08)',
-                  border: '1px solid rgba(16, 185, 129, 0.25)',
+                  background: 'var(--success-soft)',
+                  border: '1px solid var(--success-border)',
                 }}
               >
                 <div>
@@ -867,7 +867,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                     <span style={{ fontSize: '0.85rem' }}>🏛️</span>
                     <strong style={{ fontSize: '0.82rem', color: 'var(--text)' }}>{etf.name}</strong>
                   </div>
-                  <span style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 600 }}>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--success)', fontWeight: 600 }}>
                     ETF Obbligazionario · {formatEuro(etf.val)} (conta in Obbligazioni)
                   </span>
                 </div>
@@ -944,7 +944,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '8px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                  boxShadow: 'var(--shadow-sm)',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -957,7 +957,7 @@ export const AssetAllocationPanel: React.FC<AssetAllocationPanelProps> = ({
 
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '2px' }}>
                   <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Acquista per:</span>
-                  <strong style={{ fontSize: '1.25rem', color: '#10b981', fontFamily: 'var(--font-mono)' }}>
+                  <strong style={{ fontSize: '1.25rem', color: 'var(--success)', fontFamily: 'var(--font-mono)' }}>
                     {formatEuro(plan.allocatedInflow)}
                   </strong>
                 </div>
