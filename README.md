@@ -6,6 +6,7 @@ Spazio di lavoro desktop per macOS costruito con Electron, React, Vite e TypeScr
 
 - Shell moderna e adatta a macOS per i flussi di budgeting
 - Dashboard dettagliata per flusso di cassa, budget, transazioni e patrimonio netto
+- Pagina **Simulazioni** con tre strumenti: calcolo dell'interesse composto, simulazione FIRE (capitale necessario, tempo e rendita passiva) e simulazione mutui (rata, piano di ammortamento, costo reale del credito)
 - Processo principale Electron con bridge di preload sicuro
 - Renderer React basato su Vite
 - Persistenza automatica su file system per non perdere i dati durante gli aggiornamenti dell'app
@@ -340,8 +341,36 @@ L'applicazione include un sistema integrato di aggiornamento automatico che comu
 4. **Opzioni di rinvio**: L'utente può scegliere "Più tardi" oppure "Salta questa versione" per non ricevere ulteriori avvisi per quello specifico rilascio.
 5. **Configurazione & Controllo Manuale**: Nella sezione **Impostazioni > Aggiornamenti & Versioni** è possibile:
    - Attivare o disattivare il controllo automatico ad ogni avvio.
-   - Modificare il repository GitHub monitorato (predefinito: `sole31012002/budgeting-mac-app`).
+   - Modificare il repository GitHub monitorato (predefinito: `sole410-cpu/App-Budgeting-2`).
    - Lanciare un controllo manuale con un clic sul pulsante *"Controlla aggiornamenti adesso"*.
+
+### Solo release pubbliche, nessun token 🔓
+
+L'app **non usa alcun token GitHub**: il controllo degli aggiornamenti è
+completamente anonimo (nessuna intestazione `Authorization`), quindi l'app non
+chiede mai credenziali e non accede al Portachiavi di sistema.
+
+| Requisito | Comportamento |
+|-----------|----------------|
+| Repository **pubblica** | Necessaria: con una repository privata GitHub risponde `404` e l'app lo segnala con un messaggio chiaro |
+| Release **pubblicate** (`draft = false`) | Solo queste vengono considerate: le bozze sono ignorate perché non sono visibili al pubblico |
+| Pre-release | Rilevate come qualsiasi altra release (l'utente vede il badge *Pre-release*) |
+| Token / PAT | Non supportati e non richiesti |
+
+Dettagli utili:
+
+- **Nessuna credenziale in giro**: il renderer non legge né scrive segreti, il
+  processo principale non usa `safeStorage` e non ci sono più voci nel
+  Portachiavi di macOS né nel Keychain di iOS (quindi più nessuna richiesta di
+  password di login all'avvio).
+- **Pulizia delle vecchie installazioni**: un token salvato dalle versioni
+  precedenti in `localStorage` o dentro `user-data.json` viene rimosso al primo
+  avvio (il file dati viene riscritto senza il campo `githubToken`).
+- **Rete di sicurezza lato processo principale**: anche se un payload vecchio
+  contenesse ancora `githubToken`, `app:save-data` lo elimina prima di scrivere
+  qualsiasi file.
+- **Nessun fallback sui tag**: se la repository non ha release pubblicate
+  l'app lo segnala, invece di dedurre una versione da un tag non pubblicato.
 
 ### Come pubblicare una nuova versione su GitHub (Per lo sviluppatore):
 1. Aggiorna la versione in `package.json` (es. `"version": "0.2.0"`).

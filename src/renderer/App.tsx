@@ -4,7 +4,7 @@ import { Eye, EyeOff, Bell, BellRing, Smartphone, Laptop, X, Download, Upload, S
 import { SankeyChart } from './components/SankeyChart';
 import { NetWorthHistoryChart } from './components/NetWorthHistoryChart';
 import { AssetAllocationPanel, isAssetBondEtf, isAssetEquityEtf } from './components/AssetAllocationPanel';
-import { FireCalculator } from './components/FireCalculator';
+import { SimulationsPage } from './components/SimulationsPage';
 import { ReimbursementSchedulePanel } from './components/ReimbursementSchedulePanel';
 import { CategoryTrendReport } from './components/CategoryTrendReport';
 import { CashbackManager, type CashbackRule, type NewAssetPayload } from './components/CashbackManager';
@@ -297,7 +297,7 @@ type PAC = {
   createAssetTransaction?: boolean;
 };
 
-type SectionId = 'dashboard' | 'transazioni' | 'budget' | 'report' | 'patrimonio' | 'attivita' | 'ricorrenti' | 'impostazioni';
+type SectionId = 'dashboard' | 'transazioni' | 'budget' | 'report' | 'patrimonio' | 'attivita' | 'ricorrenti' | 'simulazioni' | 'impostazioni';
 
 type SectionConfig = {
   id: SectionId;
@@ -320,6 +320,24 @@ const SUBSCRIPTION_STORAGE_KEY = 'budget-ledger-subscriptions-v1';
 const ACCOUNT_INITIAL_CAPITALS_STORAGE_KEY = 'budget-ledger-account-initial-capitals-v1';
 const HIDE_NUMBERS_STORAGE_KEY = 'budget-ledger-hide-numbers-v1';
 const CASHBACK_RULES_STORAGE_KEY = 'budget-ledger-cashback-rules-v1';
+
+// === Aggiornamenti da GitHub ===
+// L'app non usa alcun token GitHub: gli aggiornamenti vengono cercati solo
+// su release **pubbliche** di una repository pubblica, senza autenticazione.
+const LEGACY_GITHUB_TOKEN_STORAGE_KEY = 'budget_github_token';
+
+/**
+ * Rimuove il token GitHub dalle vecchie installazioni.
+ *
+ * Nelle versioni precedenti il token poteva restare in chiaro in
+ * `localStorage` (o dentro `user-data.json`): ora non serve più alcuna
+ * credenziale, quindi viene semplicemente cancellato.
+ */
+function purgeLegacyGithubToken(): void {
+  try {
+    window.localStorage.removeItem(LEGACY_GITHUB_TOKEN_STORAGE_KEY);
+  } catch {}
+}
 
 const defaultCashbackRules: CashbackRule[] = [
   {
@@ -422,7 +440,13 @@ const sections: SectionConfig[] = [
     id: 'report',
     label: 'Report & Patrimonio',
     title: 'Report, Patrimonio & Analisi',
-    description: 'Quadro patrimoniale, bilancio dei flussi, asset allocation e simulatore FIRE.',
+    description: 'Quadro patrimoniale, bilancio dei flussi e asset allocation.',
+  },
+  {
+    id: 'simulazioni',
+    label: 'Simulazioni',
+    title: 'Simulazioni',
+    description: 'Proietta la crescita del capitale (interesse composto), il percorso verso l’indipendenza finanziaria (FIRE) e i costi di un mutuo.',
   },
   {
     id: 'impostazioni',
@@ -2299,13 +2323,8 @@ function App() {
       return 'Ale410-cpu/App-Budgeting-2';
     }
   });
-  const [githubToken, setGithubToken] = useState<string>(() => {
-    try {
-      return localStorage.getItem('budget_github_token') || '';
-    } catch {
-      return '';
-    }
-  });
+  // Gli aggiornamenti vengono cercati solo su release pubbliche: nessun
+  // token e nessun archivio sicuro sono più necessari.
   const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('budget_auto_check_updates');
@@ -2337,11 +2356,15 @@ function App() {
     } catch {}
   }, [githubRepo]);
 
+  /**
+   * Ripulisce il token GitHub dalle vecchie installazioni.
+   *
+   * L'app non usa più credenziali: il controllo aggiornamenti interroga solo
+   * release pubbliche, quindi il token non serve più e viene rimosso.
+   */
   useEffect(() => {
-    try {
-      localStorage.setItem('budget_github_token', githubToken);
-    } catch {}
-  }, [githubToken]);
+    purgeLegacyGithubToken();
+  }, []);
 
   useEffect(() => {
     try {
@@ -2349,9 +2372,8 @@ function App() {
     } catch {}
   }, [autoCheckUpdates]);
 
-  const performCheckForUpdates = useCallback(async (isManual: boolean = false, repoToUse?: string, tokenToUse?: string) => {
+  const performCheckForUpdates = useCallback(async (isManual: boolean = false, repoToUse?: string) => {
     const repo = normalizeGithubRepo(repoToUse || githubRepo);
-    const token = (tokenToUse !== undefined ? tokenToUse : githubToken).trim();
     if (isManual) {
       setIsCheckingUpdateManual(true);
       setManualCheckFeedback(null);
@@ -2360,10 +2382,9 @@ function App() {
     try {
       let result: UpdateCheckResult;
       if (window.budgetApp && typeof window.budgetApp.checkForUpdates === 'function') {
-        result = await window.budgetApp.checkForUpdates(repo, token);
+        result = await window.budgetApp.checkForUpdates(repo);
       } else if (window.location.protocol !== 'file:') {
         const query = new URLSearchParams({ repo, _t: String(Date.now()) });
-        if (token) query.set('token', token);
         const response = await fetch(`/api/check-update?${query.toString()}`, {
           cache: 'no-store',
         });
@@ -2373,10 +2394,10 @@ function App() {
         result = await response.json();
       } else {
         // Direct GitHub API check fallback (file://)
+        // Nessuna autenticazione: solo release pubbliche.
         const headers: Record<string, string> = {
           Accept: 'application/vnd.github.v3+json',
         };
-        if (token) headers['Authorization'] = `token ${token}`;
         const ghRes = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20&_t=${Date.now()}`, {
           headers,
         });
@@ -2389,7 +2410,8 @@ function App() {
           };
         } else {
           const list = await ghRes.json();
-          const first = Array.isArray(list) && list.length > 0 ? list[0] : null;
+          const published = Array.isArray(list) ? list.filter((r) => r && r.draft !== true) : [];
+          const first = published.length > 0 ? published[0] : null;
           const latestVer = String(first?.tag_name || APP_VERSION).replace(/^v/i, '');
           result = {
             updateAvailable: false,
@@ -2439,9 +2461,10 @@ function App() {
         setIsCheckingUpdateManual(false);
       }
     }
-  }, [githubRepo, githubToken, dismissedVersion, normalizeGithubRepo]);
+  }, [githubRepo, dismissedVersion, normalizeGithubRepo]);
 
-  // Controllo automatico aggiornamenti su GitHub ad ogni apertura dell'app
+  // Controllo automatico aggiornamenti su GitHub ad ogni apertura dell'app.
+  // Vengono considerate solo le release pubbliche del repository indicato.
   useEffect(() => {
     if (autoCheckUpdates) {
       const timer = setTimeout(() => {
@@ -2493,7 +2516,6 @@ function App() {
           downloadUrl: updateInfo.asset.downloadUrl,
           apiUrl: updateInfo.asset.apiUrl,
           assetName: updateInfo.asset.name,
-          githubToken: githubToken.trim() || undefined,
         });
 
         if (res.success) {
@@ -2763,7 +2785,7 @@ function App() {
   });
   const [assetChartMode, setAssetChartMode] = useState<'capital' | 'price' | 'return'>('capital');
   const [portfolioChartMode, setPortfolioChartMode] = useState<'total' | 'no-transactions'>('total');
-  const [unifiedReportTab, setUnifiedReportTab] = useState<'patrimonio' | 'flussi' | 'allocation' | 'fire'>('patrimonio');
+  const [unifiedReportTab, setUnifiedReportTab] = useState<'patrimonio' | 'flussi' | 'allocation'>('patrimonio');
   const [recurringViewMode, setRecurringViewMode] = useState<'scadenziario' | 'recurring' | 'pac' | 'cashback'>('scadenziario');
   const [scadenziarioHorizon, setScadenziarioHorizon] = useState<'month' | '30d' | '60d' | '90d'>('month');
   const [scadenziarioTypeFilter, setScadenziarioTypeFilter] = useState<'all' | 'expense' | 'income' | 'pac'>('all');
@@ -3033,7 +3055,10 @@ function App() {
       setGithubRepo(normalizeGithubRepo(fileData.githubRepo));
     }
     if (typeof fileData.githubToken === 'string' && fileData.githubToken.trim()) {
-      setGithubToken(fileData.githubToken.trim());
+      // File esportato da una versione precedente: conteneva un token GitHub
+      // in chiaro. L'app non usa più token (gli aggiornamenti si cercano solo
+      // su release pubbliche), quindi viene ignorato e non reimportato.
+      console.warn('Il file importato contiene un vecchio token GitHub: viene ignorato.');
     }
     if (typeof fileData.autoCheckUpdates === 'boolean') {
       setAutoCheckUpdates(fileData.autoCheckUpdates);
@@ -3101,7 +3126,8 @@ function App() {
       hideNumbers,
       customLogo,
       githubRepo,
-      githubToken,
+      // Il token GitHub non fa più parte dell'app: non viene salvato né
+      // esportato (gli aggiornamenti si cercano solo su release pubbliche).
       autoCheckUpdates,
       exportedAt: new Date().toISOString(),
       _fileMeta: {
@@ -3135,7 +3161,6 @@ function App() {
     hideNumbers,
     customLogo,
     githubRepo,
-    githubToken,
     autoCheckUpdates,
   ]);
 
@@ -4608,12 +4633,14 @@ function App() {
   const {
     currentMonthExpenseTransactions,
     currentMonthIncomeTransactions,
-    currentMonthIncomeTotal
+    currentMonthIncomeTotal,
+    currentMonthExpenseTotal
   } = useMemo(() => {
     const currentMonth: Transaction[] = [];
     const expenses: Transaction[] = [];
     const incomes: Transaction[] = [];
     let incomeSum = 0;
+    let expenseSum = 0;
 
     for (let i = 0; i < transactions.length; i++) {
       const tx = transactions[i];
@@ -4623,6 +4650,7 @@ function App() {
         if (tx.kind === 'expense') {
           if (!isTransfer) {
             expenses.push(tx);
+            expenseSum += Math.abs(tx.amount);
           }
         } else if (tx.kind === 'income') {
           if (!isTransfer) {
@@ -4637,6 +4665,7 @@ function App() {
       currentMonthExpenseTransactions: expenses,
       currentMonthIncomeTransactions: incomes,
       currentMonthIncomeTotal: incomeSum,
+      currentMonthExpenseTotal: expenseSum,
     };
   }, [transactions, currentMonthStr]);
 
@@ -8856,11 +8885,13 @@ function App() {
 
         <div className="hero-rail">
           <div className="hero-rail-item">
-            <span className="rail-label">Utilizzo budget</span>
-            <strong>{budgetUsage}%</strong>
-            <div className="progress">
-              <span style={{ width: `${budgetUsage}%` }} />
-            </div>
+            <span className="rail-label">Spese del mese</span>
+            <strong>{formatEuro(currentMonthExpenseTotal)}</strong>
+            {budgetLimit > 0 && (
+              <small style={{ display: 'block', marginTop: '6px', color: 'var(--muted)' }}>
+                su {formatEuro(budgetLimit)} di budget
+              </small>
+            )}
           </div>
           <div className="hero-rail-item">
             <span className="rail-label">Entrate del mese</span>
@@ -10837,24 +10868,6 @@ function App() {
         >
           ⚖️ Asset Allocation
         </button>
-
-        <button
-          type="button"
-          onClick={() => setUnifiedReportTab('fire')}
-          style={{
-            padding: '8px 18px',
-            borderRadius: '8px',
-            fontSize: '0.85rem',
-            fontWeight: 650,
-            cursor: 'pointer',
-            border: 'none',
-            backgroundColor: unifiedReportTab === 'fire' ? 'var(--accent)' : 'transparent',
-            color: unifiedReportTab === 'fire' ? 'var(--pill-primary-text)' : 'var(--muted)',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          🚀 Simulatore FIRE & Rendita
-        </button>
       </div>
 
       {/* Dynamic Tab Content */}
@@ -11428,13 +11441,6 @@ function App() {
             setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
             setStatusMessage(`Asset ${updated.name} aggiornato con successo.`);
           }}
-        />
-      )}
-
-      {unifiedReportTab === 'fire' && (
-        <FireCalculator
-          currentNetWorth={currentNetWorth}
-          formatEuro={formatEuro}
         />
       )}
     </div>
@@ -13002,7 +13008,7 @@ function App() {
                 Repository GitHub da monitorare
               </span>
               <span style={{ fontSize: '0.74rem', color: 'var(--muted)', display: 'block', marginBottom: '10px', lineHeight: 1.45 }}>
-                L'app rileva automaticamente qualsiasi versione caricata manualmente nelle Release di GitHub (anche se marcata come <em>Pre-release</em>, o se la nuova versione è indicata nel titolo della release o nel nome del file ZIP/DMG).
+                L'app rileva automaticamente qualsiasi versione caricata manualmente nelle Release <strong>pubbliche</strong> di GitHub (anche se marcata come <em>Pre-release</em>, o se la nuova versione è indicata nel titolo della release o nel nome del file ZIP/DMG). Le bozze (<em>draft</em>) vengono ignorate.
               </span>
 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -13038,47 +13044,16 @@ function App() {
               </div>
             </div>
 
-            {/* Token opzionale per Repository Privata */}
+            {/* Release pubbliche: nessuna autenticazione richiesta */}
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
               <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: '4px' }}>
-                🔑 Token GitHub opzionale (solo se la repository è Privata)
+                🔓 Solo release pubbliche
               </span>
-              <span style={{ fontSize: '0.73rem', color: 'var(--muted)', display: 'block', marginBottom: '8px', lineHeight: 1.45 }}>
-                • <strong>Se la repository è Pubblica (Consigliato)</strong>: lascia questo campo vuoto, l'app troverà e scaricherà gli aggiornamenti su qualsiasi Mac senza autenticazione.<br />
-                • <strong>Se la repository è Privata</strong>: GitHub blocca l'accesso esterno (errore 404). In questo caso incolla qui un Personal Access Token (PAT) con permesso <code>repo</code>.
+              <span style={{ fontSize: '0.73rem', color: 'var(--muted)', display: 'block', lineHeight: 1.45 }}>
+                • L'app controlla gli aggiornamenti <strong>senza token e senza autenticazione</strong>: per questo la repository indicata deve essere <strong>pubblica</strong> (Settings → Change visibility → Public).<br />
+                • Vengono prese in considerazione solo le release <strong>pubblicate</strong>: le bozze (<code>draft</code>) sono ignorate, perché non sono visibili al pubblico.<br />
+                • Nessuna credenziale viene richiesta o conservata: niente Portachiavi, niente password di login all'avvio.
               </span>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                <input
-                  type="password"
-                  value={githubToken}
-                  onChange={(e) => setGithubToken(e.target.value)}
-                  placeholder=""
-                  style={{
-                    flex: 1,
-                    minWidth: '220px',
-                    padding: '8px 12px',
-                    borderRadius: '10px',
-                    border: '1px solid var(--border)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--text)',
-                    fontSize: '0.83rem',
-                    fontFamily: 'monospace',
-                  }}
-                />
-                {githubToken && (
-                  <button
-                    type="button"
-                    className="pill"
-                    onClick={() => {
-                      setGithubToken('');
-                      setStatusMessage('Token GitHub rimosso.');
-                    }}
-                    style={{ padding: '8px 14px', fontSize: '0.78rem' }}
-                  >
-                    Rimuovi token
-                  </button>
-                )}
-              </div>
             </div>
           </div>
 
@@ -13728,6 +13703,13 @@ function App() {
         return renderAssets();
       case 'ricorrenti':
         return renderRecurringAndPAC();
+      case 'simulazioni':
+        return (
+          <SimulationsPage
+            currentNetWorth={currentNetWorth}
+            formatEuro={formatEuro}
+          />
+        );
       case 'impostazioni':
         return renderSettings();
       default:

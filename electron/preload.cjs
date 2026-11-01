@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('budgetApp', {
     ipcRenderer.invoke('app:use-icloud-data-location', currentData),
   openDataFolder: () => ipcRenderer.invoke('app:open-data-folder'),
   getTickerPrice: (ticker) => ipcRenderer.invoke('app:get-ticker-price', ticker),
-  checkForUpdates: (repo, githubToken) => ipcRenderer.invoke('app:check-for-updates', repo, githubToken),
+  checkForUpdates: (repo) => ipcRenderer.invoke('app:check-for-updates', repo),
   downloadAndInstallUpdate: (options) => ipcRenderer.invoke('app:download-and-install-update', options),
   sendNotification: (payload) => ipcRenderer.invoke('app:send-notification', payload),
   getNotificationCapability: () => ipcRenderer.invoke('app:notification-capability'),

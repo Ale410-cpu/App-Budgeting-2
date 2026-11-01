@@ -86,12 +86,11 @@ export interface BudgetAppBridge {
   }>;
   openDataFolder(): Promise<boolean>;
   getTickerPrice(ticker: string): Promise<any>;
-  checkForUpdates(repo?: string, githubToken?: string): Promise<UpdateCheckResult>;
+  checkForUpdates(repo?: string): Promise<UpdateCheckResult>;
   downloadAndInstallUpdate(options: {
     downloadUrl: string;
     apiUrl?: string;
     assetName: string;
-    githubToken?: string;
   }): Promise<{
     success: boolean;
     message?: string;

@@ -25,6 +25,55 @@ if (process.platform === 'win32' || process.platform === 'darwin') {
 const devServerUrl = 'http://127.0.0.1:3000';
 const TICKER_REGEX = /^[A-Z0-9.\-^=]{1,20}$/;
 
+/**
+ * Rimuove il campo `githubToken` da un payload destinato al disco.
+ *
+ * L'app non usa più alcun token GitHub (gli aggiornamenti si consultano
+ * solo su release pubbliche, senza autenticazione), ma i file dati creati
+ * dalle versioni precedenti potrebbero ancora contenerlo: viene eliminato
+ * per non lasciare credenziali in chiaro su disco o su iCloud Drive.
+ */
+function stripLegacyGithubTokenFromPayload(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  if (!Object.prototype.hasOwnProperty.call(data, 'githubToken')) return data;
+
+  const clone = { ...data };
+  delete clone.githubToken;
+  return clone;
+}
+
+/**
+ * Ripulisce dal file dati (su disco) il campo `githubToken` lasciato dalle
+ * versioni precedenti dell'app.
+ *
+ * @param {string | null} filePath
+ */
+function purgeLegacyGithubTokenFromFile(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return;
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+    if (!Object.prototype.hasOwnProperty.call(parsed, 'githubToken')) return;
+
+    const cleaned = { ...parsed };
+    delete cleaned.githubToken;
+    const serialized = JSON.stringify(cleaned, null, 2);
+
+    // Come in `safeWriteJson`: la scrittura non deve sembrare una modifica
+    // esterna al watcher (eviterebbe un reload inutile all'avvio).
+    isWritingData = true;
+    fs.writeFileSync(filePath, serialized);
+    lastWrittenHash = crypto.createHash('md5').update(serialized).digest('hex');
+    lastSemanticHash = semanticHashOf(cleaned);
+    setTimeout(() => {
+      isWritingData = false;
+    }, 1200);
+
+    console.log('Token GitHub legacy rimosso dal file dati.');
+  } catch {}
+}
+
 let mainWindow = null;
 let activeDataFilePath = null;
 let isWritingData = false;
@@ -190,11 +239,15 @@ function pickReleaseAsset(assets, platform, arch, targetVersion) {
     const armDmg = pool.find((a) => a.name.endsWith('.dmg') && (a.name.includes('arm64') || a.name.includes('aarch64')));
     const x64Dmg = pool.find((a) => a.name.endsWith('.dmg') && (a.name.includes('x64') || a.name.includes('intel')));
     const anyDmg = pool.find((a) => a.name.endsWith('.dmg'));
+    // DMG senza indicazione di architettura: preferito rispetto a un DMG
+    // dichiarato per l'architettura opposta (evita di installare un build errato).
+    const genericDmg = pool.find((a) => a.name.endsWith('.dmg') && !/x64|intel|arm64|aarch64/i.test(a.name));
     const armZip = pool.find((a) => a.name.endsWith('.zip') && (a.name.includes('arm64') || a.name.includes('mac')));
     const anyZip = pool.find((a) => a.name.endsWith('.zip') || a.name.includes('.zip.part_'));
 
     if (isArm && armDmg) return armDmg;
     if (!isArm && x64Dmg) return x64Dmg;
+    if (genericDmg) return genericDmg;
     if (anyDmg) return anyDmg;
     if (isArm && armZip) return armZip;
     if (anyZip) return anyZip;
@@ -215,7 +268,7 @@ function pickReleaseAsset(assets, platform, arch, targetVersion) {
   return pool[0] || null;
 }
 
-function downloadFileWithRedirects(url, destPath, onProgress, authToken = '') {
+function downloadFileWithRedirects(url, destPath, onProgress) {
   return new Promise((resolve, reject) => {
     try {
       if (fs.existsSync(destPath)) {
@@ -227,7 +280,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, authToken = '') {
     let totalBytes = 0;
     let receivedBytes = 0;
 
-    function get(currentUrl, redirectCount = 0, includeAuth = Boolean(authToken)) {
+    function get(currentUrl, redirectCount = 0) {
       if (redirectCount > 8) {
         file.close();
         fs.unlink(destPath, () => {});
@@ -241,9 +294,6 @@ function downloadFileWithRedirects(url, destPath, onProgress, authToken = '') {
         'User-Agent': 'BudgetingMacApp-Updater/1.0',
         'Accept': parsedUrl.hostname === 'api.github.com' ? 'application/octet-stream' : '*/*',
       };
-      if (includeAuth && authToken && (parsedUrl.hostname === 'api.github.com' || parsedUrl.hostname === 'github.com')) {
-        reqHeaders['Authorization'] = `token ${authToken}`;
-      }
 
       const req = client.get(
         currentUrl,
@@ -256,10 +306,8 @@ function downloadFileWithRedirects(url, destPath, onProgress, authToken = '') {
             if (!nextUrl.startsWith('http://') && !nextUrl.startsWith('https://')) {
               nextUrl = new URL(nextUrl, parsedUrl.origin).href;
             }
-            const nextParsed = new URL(nextUrl);
-            const keepAuth = nextParsed.hostname === 'api.github.com' || nextParsed.hostname === 'github.com';
             res.resume();
-            return get(nextUrl, redirectCount + 1, keepAuth);
+            return get(nextUrl, redirectCount + 1);
           }
 
           if (res.statusCode !== 200) {
@@ -293,7 +341,7 @@ function downloadFileWithRedirects(url, destPath, onProgress, authToken = '') {
       });
     }
 
-    get(url, 0, Boolean(authToken));
+    get(url, 0);
   });
 }
 
@@ -1089,6 +1137,9 @@ ipcMain.handle('app:load-data', async (event) => {
     activeDataFilePath = best.filePath;
     setupDataFileWatcher(activeDataFilePath);
 
+    // Ripulisce il token GitHub rimasto in chiaro nelle versioni precedenti.
+    purgeLegacyGithubTokenFromFile(activeDataFilePath);
+
     if (best.data) {
       return best.data;
     }
@@ -1119,8 +1170,13 @@ ipcMain.handle('app:save-data', async (event, data) => {
       activeDataFilePath = path.join(primaryDir, 'user-data.json');
     }
 
+    // Il token GitHub non fa più parte dell'app: se un payload vecchio lo
+    // contiene ancora (per esempio ripristinando un export precedente) viene
+    // rimosso, così non finisce mai in chiaro nel file dati.
+    const payload = stripLegacyGithubTokenFromPayload(data);
+
     // Limit maximum payload to 50MB
-    const serialized = JSON.stringify(data);
+    const serialized = JSON.stringify(payload);
     if (serialized.length > 50 * 1024 * 1024) {
       return { success: false, error: 'Payload exceeds maximum allowed size (50MB)' };
     }
@@ -1130,27 +1186,27 @@ ipcMain.handle('app:save-data', async (event, data) => {
     const primaryPath = path.join(primaryDir, 'user-data.json');
     if (activeDataFilePath !== primaryPath) {
       try {
-        await safeWriteJson(primaryPath, data, activeDataFilePath);
+        await safeWriteJson(primaryPath, payload, activeDataFilePath);
       } catch {}
     }
 
     const internalPath = path.join(app.getPath('userData'), 'user-data.json');
     if (activeDataFilePath !== internalPath && primaryPath !== internalPath) {
       try {
-        await safeWriteJson(internalPath, data, activeDataFilePath);
+        await safeWriteJson(internalPath, payload, activeDataFilePath);
       } catch {}
     }
 
     // Se il contenuto non e' cambiato, non riscrivere: evita conflitti con
     // l'altra piattaforma quando il file e' condiviso su iCloud Drive.
-    const semanticHash = semanticHashOf(data);
+    const semanticHash = semanticHashOf(payload);
     if (semanticHash && semanticHash === lastSemanticHash && fs.existsSync(activeDataFilePath)) {
       return { success: true, filePath: activeDataFilePath };
     }
     lastSemanticHash = semanticHash;
 
     // 2. Write to the active primary path LAST and lock it as primary
-    await safeWriteJson(activeDataFilePath, data, activeDataFilePath);
+    await safeWriteJson(activeDataFilePath, payload, activeDataFilePath);
     recordPrimaryDataPath(activeDataFilePath, Boolean(recordedInfo?.isCustomPrimary));
 
     return { success: true, filePath: activeDataFilePath };
@@ -1660,20 +1716,7 @@ ipcMain.handle('app:get-ticker-price', async (event, ticker) => {
   }
 });
 
-function getStoredGithubToken() {
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN.trim();
-  try {
-    if (activeDataFilePath && fs.existsSync(activeDataFilePath)) {
-      const parsed = JSON.parse(fs.readFileSync(activeDataFilePath, 'utf-8'));
-      if (parsed && typeof parsed.githubToken === 'string' && parsed.githubToken.trim()) {
-        return parsed.githubToken.trim();
-      }
-    }
-  } catch {}
-  return '';
-}
-
-ipcMain.handle('app:check-for-updates', async (event, customRepo, customToken) => {
+ipcMain.handle('app:check-for-updates', async (event, customRepo) => {
   if (!validateIpcSender(event)) {
     throw new Error('Unauthorized IPC sender');
   }
@@ -1692,42 +1735,28 @@ ipcMain.handle('app:check-for-updates', async (event, customRepo, customToken) =
       : defaultRepo;
 
   const currentVersion = app.getVersion() || '0.3.6';
-  const token = (typeof customToken === 'string' && customToken.trim()) || getStoredGithubToken();
 
   try {
     const apiUrl = `https://api.github.com/repos/${repo}/releases?per_page=30&_t=${Date.now()}`;
+    // Nessuna autenticazione: l'app legge solo release **pubbliche**.
     const headers = {
       'User-Agent': 'BudgetingMacApp-Updater/1.0',
       'Accept': 'application/vnd.github.v3+json',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Pragma': 'no-cache',
     };
-    if (token) {
-      headers['Authorization'] = `token ${token}`;
-    }
 
-    let response = await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       signal: AbortSignal.timeout(9000),
       headers,
     });
-
-    if ((response.status === 401 || response.status === 403) && token) {
-      const publicHeaders = { ...headers };
-      delete publicHeaders['Authorization'];
-      response = await fetch(apiUrl, {
-        signal: AbortSignal.timeout(9000),
-        headers: publicHeaders,
-      });
-    }
 
     if (response.status === 404) {
       return {
         updateAvailable: false,
         currentVersion,
         latestVersion: currentVersion,
-        message: token
-          ? `Repository "${repo}" non trovato su GitHub (404). Verifica il nome "proprietario/repository".`
-          : `Repository "${repo}" non trovato o privato (404). Se la repository su GitHub è privata, rendila Pubblica nelle impostazioni di GitHub (Settings → Change visibility → Public) oppure inserisci un Token GitHub (PAT).`,
+        message: `Repository "${repo}" non trovata o non pubblica (404). Gli aggiornamenti vengono cercati solo su release pubbliche: rendi la repository pubblica su GitHub (Settings → Change visibility → Public) oppure indica un altro repository "proprietario/repository".`,
         repo,
       };
     }
@@ -1743,38 +1772,18 @@ ipcMain.handle('app:check-for-updates', async (event, customRepo, customToken) =
     }
 
     const releasesList = await response.json();
-    let validReleases = Array.isArray(releasesList)
-      ? releasesList.filter((r) => !r.draft)
+    // Solo release pubblicate: le bozze (draft) non sono visibili al pubblico
+    // e quindi non possono generare un aggiornamento.
+    const validReleases = Array.isArray(releasesList)
+      ? releasesList.filter((r) => r && r.draft !== true)
       : [];
-    if (validReleases.length === 0 && Array.isArray(releasesList) && releasesList.length > 0) {
-      validReleases = releasesList;
-    }
-
-    if (validReleases.length === 0) {
-      const tagsResp = await fetch(`https://api.github.com/repos/${repo}/tags?per_page=20&_t=${Date.now()}`, {
-        signal: AbortSignal.timeout(8000),
-        headers,
-      });
-      if (tagsResp.ok) {
-        const tagsList = await tagsResp.json();
-        if (Array.isArray(tagsList) && tagsList.length > 0) {
-          validReleases = tagsList.map((t) => ({
-            tag_name: t.name,
-            name: t.name,
-            body: 'Tag pubblicato su GitHub.',
-            html_url: `https://github.com/${repo}/releases/tag/${t.name}`,
-            assets: [],
-          }));
-        }
-      }
-    }
 
     if (validReleases.length === 0) {
       return {
         updateAvailable: false,
         currentVersion,
         latestVersion: currentVersion,
-        message: `Nessuna release o versione pubblicata trovata nel repository "${repo}".`,
+        message: `Nessuna release pubblicata trovata nel repository "${repo}". Gli aggiornamenti vengono cercati solo nelle release pubbliche (non bozze).`,
         repo,
       };
     }
@@ -1897,7 +1906,7 @@ function getRunningMacAppBundlePath() {
   return '/Applications/BudgetingMacApp.app';
 }
 
-ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, apiUrl, assetName, githubToken }) => {
+ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, apiUrl, assetName }) => {
   if (!validateIpcSender(event)) {
     throw new Error('Unauthorized IPC sender');
   }
@@ -1913,8 +1922,9 @@ ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, a
 
   const tempDir = app.getPath('temp');
   const targetFile = path.join(tempDir, safeAssetName);
-  const token = (typeof githubToken === 'string' && githubToken.trim()) || getStoredGithubToken();
-  const effectiveUrl = token && apiUrl ? apiUrl : downloadUrl;
+  // Solo asset pubblici: si usa sempre l'URL di download diretto
+  // (`browser_download_url`), non l'API GitHub che richiederebbe autenticazione.
+  const effectiveUrl = downloadUrl;
 
   const emitProgress = (progress) => {
     try {
@@ -1926,10 +1936,10 @@ ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, a
 
   try {
     try {
-      await downloadFileWithRedirects(effectiveUrl, targetFile, emitProgress, token);
+      await downloadFileWithRedirects(effectiveUrl, targetFile, emitProgress);
     } catch (firstErr) {
-      if (token && effectiveUrl !== downloadUrl) {
-        await downloadFileWithRedirects(downloadUrl, targetFile, emitProgress, '');
+      if (apiUrl && effectiveUrl !== apiUrl) {
+        await downloadFileWithRedirects(apiUrl, targetFile, emitProgress);
       } else {
         throw firstErr;
       }

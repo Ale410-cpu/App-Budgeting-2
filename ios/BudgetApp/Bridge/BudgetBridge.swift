@@ -1,5 +1,6 @@
 import Foundation
 import PhotosUI
+import Security
 import UIKit
 import UniformTypeIdentifiers
 import UserNotifications
@@ -129,8 +130,8 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
         },
         openDataFolder: function () { return call('openDataFolder'); },
         getTickerPrice: function (ticker) { return call('getTickerPrice', ticker); },
-        checkForUpdates: function (repo, token) {
-          return call('checkForUpdates', { repo: repo, token: token });
+        checkForUpdates: function (repo) {
+          return call('checkForUpdates', { repo: repo });
         },
         downloadAndInstallUpdate: function (options) { return call('downloadAndInstallUpdate', options || {}); },
         sendNotification: function (payload) { return call('sendNotification', payload || {}); },
@@ -288,7 +289,16 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
     }
 
     private func saveData(_ args: Any?, replyTo id: String) {
-        guard let payload = args, JSONSerialization.isValidJSONObject(payload) else {
+        // Il token GitHub non fa piu' parte dell'app: se il payload ne contiene
+        // ancora uno (per esempio ripristinando un export vecchio) viene
+        // rimosso, cosi' nessuna credenziale resta nel JSON scritto su disco.
+        var payload = args
+        if var dictionary = payload as? [String: Any] {
+            dictionary.removeValue(forKey: "githubToken")
+            payload = dictionary
+        }
+
+        guard let payload = payload, JSONSerialization.isValidJSONObject(payload) else {
             reply(id, error: "Dati non serializzabili")
             return
         }
@@ -755,7 +765,8 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
     private func checkForUpdates(_ args: Any?, replyTo id: String) {
         let wrapper = args as? [String: Any]
         let rawRepo = (wrapper?["repo"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let token = (wrapper?["token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        // Nessuna autenticazione: gli aggiornamenti si cercano solo su
+        // release pubbliche di una repository pubblica.
         let repo = BudgetBridge.normalizeRepo(rawRepo)
         let currentVersion = appVersion()
 
@@ -771,9 +782,6 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
         request.setValue("BudgetApp-iOS-Updater/1.0", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        if !token.isEmpty {
-            request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
-        }
         request.timeoutInterval = 15
 
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -789,8 +797,29 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
             }
 
             guard let data,
-                  let http = response as? HTTPURLResponse,
-                  http.statusCode == 200,
+                  let http = response as? HTTPURLResponse else {
+                self.reply(id, value: [
+                    "updateAvailable": false,
+                    "currentVersion": currentVersion,
+                    "latestVersion": currentVersion,
+                    "error": "Risposta non valida da GitHub.",
+                    "repo": repo,
+                ])
+                return
+            }
+
+            if http.statusCode == 404 {
+                self.reply(id, value: [
+                    "updateAvailable": false,
+                    "currentVersion": currentVersion,
+                    "latestVersion": currentVersion,
+                    "message": "Repository \"\(repo)\" non trovata o non pubblica (404). Gli aggiornamenti vengono cercati solo su release pubbliche: rendi la repository pubblica su GitHub oppure indica un altro repository \"proprietario/repository\".",
+                    "repo": repo,
+                ])
+                return
+            }
+
+            guard http.statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
                 self.reply(id, value: [
                     "updateAvailable": false,
@@ -802,6 +831,8 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
                 return
             }
 
+            // Solo release pubblicate: le bozze (draft) non sono visibili al
+            // pubblico e quindi non possono generare un aggiornamento.
             let candidates = json.filter { ($0["draft"] as? Bool) != true }
             guard let best = candidates.max(by: { lhs, rhs in
                 let left = BudgetBridge.extractVersion(from: lhs) ?? "0.0.0"

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { simulateFire } from '../utils/financeSim';
 
 interface FireCalculatorProps {
   currentNetWorth: number;
@@ -9,86 +10,28 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
   const [initialCapital, setInitialCapital] = useState<number>(() => Math.max(1000, Math.round(currentNetWorth || 10000)));
   const [monthlyContribution, setMonthlyContribution] = useState<number>(500);
   const [expectedReturnRate, setExpectedReturnRate] = useState<number>(7); // 7% annual return
-  const inflationRate = 2; // 2% inflation target
+  const [inflationRate, setInflationRate] = useState<number>(2); // inflation target, editable
   const [years, setYears] = useState<number>(20);
   const [targetMonthlyExpense, setTargetMonthlyExpense] = useState<number>(1500);
   const [adjustForInflation, setAdjustForInflation] = useState<boolean>(true);
   const [showFireGuide, setShowFireGuide] = useState<boolean>(false);
 
-  // Projections
-  const simulation = useMemo(() => {
-    const netReturn = adjustForInflation
-      ? (1 + expectedReturnRate / 100) / (1 + inflationRate / 100) - 1
-      : expectedReturnRate / 100;
+  // Projections (motore di calcolo condiviso con la pagina Simulazioni)
+  const simulation = useMemo(
+    () =>
+      simulateFire({
+        initialCapital,
+        monthlyContribution,
+        annualReturnPercent: expectedReturnRate,
+        inflationPercent: adjustForInflation ? inflationRate : 0,
+        targetMonthlyExpense,
+        years,
+      }),
+    [initialCapital, monthlyContribution, expectedReturnRate, inflationRate, years, targetMonthlyExpense, adjustForInflation],
+  );
 
-    const monthlyRate = Math.pow(1 + netReturn, 1 / 12) - 1;
-    const totalMonths = years * 12;
-
-    const yearlyData: Array<{
-      year: number;
-      contributed: number;
-      interest: number;
-      total: number;
-    }> = [];
-
-    let currentBalance = initialCapital;
-    let totalContributed = initialCapital;
-
-    yearlyData.push({
-      year: 0,
-      contributed: initialCapital,
-      interest: 0,
-      total: initialCapital,
-    });
-
-    for (let m = 1; m <= totalMonths; m++) {
-      currentBalance = currentBalance * (1 + monthlyRate) + monthlyContribution;
-      totalContributed += monthlyContribution;
-
-      if (m % 12 === 0) {
-        const y = m / 12;
-        yearlyData.push({
-          year: y,
-          contributed: totalContributed,
-          interest: Math.max(0, currentBalance - totalContributed),
-          total: currentBalance,
-        });
-      }
-    }
-
-    const finalTotal = currentBalance;
-    const finalContributed = totalContributed;
-    const finalInterest = Math.max(0, finalTotal - finalContributed);
-
-    // 4% Rule: Safe Withdrawal Rate
-    const annualPassiveIncome = finalTotal * 0.04;
-    const monthlyPassiveIncome = annualPassiveIncome / 12;
-
-    // Target FIRE capital needed (25x annual expenses)
-    const annualExpense = targetMonthlyExpense * 12;
-    const fireNumber = annualExpense * 25;
-
-    // Estimate years to FIRE
-    let yearsToFire = 0;
-    let simBal = initialCapital;
-    while (simBal < fireNumber && yearsToFire < 60) {
-      yearsToFire++;
-      for (let month = 0; month < 12; month++) {
-        simBal = simBal * (1 + monthlyRate) + monthlyContribution;
-      }
-    }
-
-    return {
-      yearlyData,
-      finalTotal,
-      finalContributed,
-      finalInterest,
-      monthlyPassiveIncome,
-      annualPassiveIncome,
-      fireNumber,
-      yearsToFire: simBal >= fireNumber ? yearsToFire : '> 60',
-    };
-  }, [initialCapital, monthlyContribution, expectedReturnRate, inflationRate, years, targetMonthlyExpense, adjustForInflation]);
+  const yearsToFireLabel =
+    simulation.yearsToFire === null ? '> 80' : simulation.yearsToFire === 0 ? 'Già raggiunto' : simulation.yearsToFire;
 
   // Chart dimensions
   const svgWidth = 860;
@@ -257,18 +200,46 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
             <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Uscite mensili per vivere liberi dal lavoro.</span>
           </label>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', justifyContent: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text)' }}>
               <input
                 type="checkbox"
                 checked={adjustForInflation}
                 onChange={(e) => setAdjustForInflation(e.target.checked)}
               />
-              <span>Aggiusta per inflazione (2% annuo)</span>
+              <span>Aggiusta per inflazione</span>
             </label>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', opacity: adjustForInflation ? 1 : 0.45 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--muted)', fontWeight: 600 }}>Inflazione Annua Attesa</span>
+                <strong style={{ fontSize: '0.75rem', color: 'var(--warning)' }}>{inflationRate}%</strong>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={inflationRate}
+                onChange={(e) => setInflationRate(parseFloat(e.target.value))}
+                disabled={!adjustForInflation}
+                style={{ accentColor: 'var(--warning)' }}
+              />
+              <input
+                type="number"
+                min="0"
+                max="30"
+                step="0.5"
+                value={inflationRate}
+                onChange={(e) => setInflationRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                disabled={!adjustForInflation}
+                style={{ padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text)', fontWeight: 600, maxWidth: '110px' }}
+              />
+            </div>
+
             <small style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
               {adjustForInflation
-                ? 'I valori riflettono il reale potere d’acquisto odierno (consigliato).'
+                ? `I valori riflettono il reale potere d’acquisto odierno, corretti per un’inflazione del ${inflationRate}% annuo (consigliato).`
                 : 'I valori mostrano cifre nominali future senza tener conto del carovita.'}
             </small>
           </div>
@@ -368,7 +339,7 @@ export const FireCalculator: React.FC<FireCalculatorProps> = ({ currentNetWorth,
                 Tempo a Indipendenza (FIRE)
               </span>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--warning)', marginTop: '4px', lineHeight: 1.2 }}>
-                {simulation.yearsToFire} {typeof simulation.yearsToFire === 'number' ? (simulation.yearsToFire === 1 ? 'anno' : 'anni') : ''}
+                {yearsToFireLabel} {typeof yearsToFireLabel === 'number' ? (yearsToFireLabel === 1 ? 'anno' : 'anni') : ''}
               </div>
               <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>con l'attuale ritmo di risparmio</span>
             </div>

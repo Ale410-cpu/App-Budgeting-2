@@ -189,13 +189,6 @@ async function startServer() {
       return res.status(400).json({ error: 'Formato repository non valido. Usa "owner/repo"' });
     }
 
-    const rawCustomToken =
-      (typeof req.query.token === 'string' && req.query.token.trim()) ||
-      (typeof req.headers['x-github-token'] === 'string' && req.headers['x-github-token'].trim()) ||
-      process.env.GITHUB_TOKEN ||
-      '';
-    const customToken = rawCustomToken.replace(/[\r\n\x00-\x1F\x7F]/g, '').slice(0, 255);
-
     const parseSemver = (v: string): number[] => {
       if (!v) return [0, 0, 0];
       const match = String(v).match(/(\d+(?:\.\d+)+)/);
@@ -254,33 +247,19 @@ async function startServer() {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',
       };
-      if (customToken) {
-        headers['Authorization'] = `token ${customToken}`;
-      }
 
-      let response = await fetch(`https://api.github.com/repos/${rawRepo}/releases?per_page=30&_t=${Date.now()}`, {
+      // Nessuna autenticazione: vengono lette solo release pubbliche.
+      const response = await fetch(`https://api.github.com/repos/${rawRepo}/releases?per_page=30&_t=${Date.now()}`, {
         signal: AbortSignal.timeout(9000),
         headers,
       });
-
-      // Fallback without token if user provided an invalid custom token on a public repo
-      if ((response.status === 401 || response.status === 403) && customToken) {
-        const publicHeaders = { ...headers };
-        delete publicHeaders['Authorization'];
-        response = await fetch(`https://api.github.com/repos/${rawRepo}/releases?per_page=30&_t=${Date.now()}`, {
-          signal: AbortSignal.timeout(9000),
-          headers: publicHeaders,
-        });
-      }
 
       if (response.status === 404) {
         return res.json({
           updateAvailable: false,
           currentVersion: APP_VERSION,
           latestVersion: APP_VERSION,
-          message: customToken
-            ? `Repository "${rawRepo}" non trovato su GitHub (404). Verifica il nome "proprietario/repository".`
-            : `Repository "${rawRepo}" non trovato o privato (404). Se la repository su GitHub è privata, rendila Pubblica nelle impostazioni di GitHub (Settings → Change visibility → Public) oppure inserisci un Token GitHub (PAT).`,
+          message: `Repository "${rawRepo}" non trovata o non pubblica (404). Gli aggiornamenti vengono cercati solo su release pubbliche: rendi la repository pubblica su GitHub (Settings → Change visibility → Public) oppure indica un altro repository "proprietario/repository".`,
           repo: rawRepo,
         });
       }
@@ -294,39 +273,18 @@ async function startServer() {
       }
 
       const releasesList = (await response.json()) as any[];
-      let validReleases = Array.isArray(releasesList)
-        ? releasesList.filter((r) => !r.draft)
+      // Solo release pubblicate: le bozze (draft) non sono visibili al pubblico
+      // e quindi non possono generare un aggiornamento.
+      const validReleases = Array.isArray(releasesList)
+        ? releasesList.filter((r) => r && r.draft !== true)
         : [];
-      if (validReleases.length === 0 && Array.isArray(releasesList) && releasesList.length > 0) {
-        validReleases = releasesList;
-      }
-
-      // If no releases exist, check tags as fallback
-      if (validReleases.length === 0) {
-        const tagsResp = await fetch(`https://api.github.com/repos/${rawRepo}/tags?per_page=20&_t=${Date.now()}`, {
-          signal: AbortSignal.timeout(8000),
-          headers,
-        });
-        if (tagsResp.ok) {
-          const tagsList = (await tagsResp.json()) as any[];
-          if (Array.isArray(tagsList) && tagsList.length > 0) {
-            validReleases = tagsList.map((t) => ({
-              tag_name: t.name,
-              name: t.name,
-              body: 'Tag pubblicato su GitHub.',
-              html_url: `https://github.com/${rawRepo}/releases/tag/${t.name}`,
-              assets: [],
-            }));
-          }
-        }
-      }
 
       if (validReleases.length === 0) {
         return res.json({
           updateAvailable: false,
           currentVersion: APP_VERSION,
           latestVersion: APP_VERSION,
-          message: `Nessuna release o versione pubblicata trovata nel repository "${rawRepo}".`,
+          message: `Nessuna release pubblicata trovata nel repository "${rawRepo}". Gli aggiornamenti vengono cercati solo nelle release pubbliche (non bozze).`,
           repo: rawRepo,
         });
       }
