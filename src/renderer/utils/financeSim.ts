@@ -322,3 +322,229 @@ export function simulateMortgage(input: MortgageInput): MortgageResult {
     },
   };
 }
+
+// === Timeline mutuo con rinegoziazioni ===
+
+/**
+ * Rinegoziazione applicata a un mutuo esistente: dal giorno `date` il piano
+ * viene ricalcolato sul capitale residuo con nuovo tasso e nuova durata.
+ */
+export interface MortgageTimelineRenegotiation {
+  /** Data di applicazione (YYYY-MM-DD). */
+  date: string;
+  /** Nuovo TAN annuo in percentuale. */
+  annualRatePercent: number;
+  /** Nuova durata residua in anni. */
+  remainingYears: number;
+}
+
+export interface MortgageTimelineRow {
+  /** Data della rata (YYYY-MM-DD). */
+  date: string;
+  payment: number;
+  principal: number;
+  interest: number;
+  /** Capitale residuo dopo la rata. */
+  remaining: number;
+  /** 0 = condizioni originarie, >0 = indice della rinegoziazione attiva. */
+  phase: number;
+}
+
+export interface MortgageTimelineResult {
+  rows: MortgageTimelineRow[];
+  /** Rata della prima fase del piano. */
+  initialMonthlyPayment: number;
+  /** Rata attualmente in vigore (ultima rata <= oggi, o la prima). */
+  currentMonthlyPayment: number;
+  /** Tasso annuo attualmente in vigore (%). */
+  currentRatePercent: number;
+  totalPaid: number;
+  totalInterest: number;
+  totalPrincipal: number;
+  /** Data dell'ultima rata (estinzione), null se il piano non si estingue. */
+  payoffDate: string | null;
+  /** Capitale residuo a una data (inclusa). Prima della prima rata restituisce il capitale iniziale. */
+  remainingAt: (dateStr: string) => number;
+}
+
+function parseTimelineDate(s: string): Date {
+  const parts = (s || '').split('-');
+  return new Date(parseInt(parts[0], 10) || 1970, (parseInt(parts[1], 10) || 1) - 1, parseInt(parts[2], 10) || 1);
+}
+
+function timelineDateIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Simula l'intera timeline di un mutuo, mese per mese, a partire dalla data di
+ * erogazione. Le rinegoziazioni dividono il piano in "fasi": alla data di ciascuna
+ * rinegoziazione la rata viene ricalcolata sul capitale residuo con il nuovo tasso
+ * e la nuova durata residua. Supporta ammortamento francese (rata costante per
+ * fase) e italiano (quota capitale costante per fase), oltre a un versamento
+ * extra mensile che accelera l'estinzione.
+ */
+export function simulateMortgageTimeline(input: {
+  principal: number;
+  years: number;
+  annualRatePercent: number;
+  type: AmortizationType;
+  startDate: string;
+  installmentDay?: number;
+  extraMonthlyPayment?: number;
+  renegotiations?: MortgageTimelineRenegotiation[];
+}): MortgageTimelineResult {
+  const principal = Math.max(0, input.principal || 0);
+  const dom = Math.min(31, Math.max(1, Math.round(input.installmentDay || 1)));
+  const extra = Math.max(0, input.extraMonthlyPayment || 0);
+  const isFrench = input.type !== 'italian';
+
+  const empty: MortgageTimelineResult = {
+    rows: [],
+    initialMonthlyPayment: 0,
+    currentMonthlyPayment: 0,
+    currentRatePercent: 0,
+    totalPaid: 0,
+    totalInterest: 0,
+    totalPrincipal: 0,
+    payoffDate: null,
+    remainingAt: () => 0,
+  };
+  if (principal <= 0) return empty;
+
+  const start = parseTimelineDate(input.startDate || '');
+  if (isNaN(start.getTime())) {
+    return { ...empty, remainingAt: () => principal };
+  }
+
+  // Fasi: condizioni originarie + rinegoziazioni ordinate per data
+  type Phase = { date: string; rate: number; months: number };
+  const phases: Phase[] = [
+    {
+      date: timelineDateIso(start),
+      rate: Math.max(0, input.annualRatePercent || 0),
+      months: Math.max(1, Math.round(input.years || 1)) * 12,
+    },
+  ];
+  (input.renegotiations || [])
+    .filter((r) => r && r.date && r.date >= phases[0].date)
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .forEach((r) =>
+      phases.push({
+        date: r.date,
+        rate: Math.max(0, r.annualRatePercent || 0),
+        months: Math.max(1, Math.round(r.remainingYears || 1)) * 12,
+      })
+    );
+
+  const rows: MortgageTimelineRow[] = [];
+  let remaining = principal;
+  let totalPaid = 0;
+  let totalInterest = 0;
+  let totalPrincipal = 0;
+
+  let phaseIdx = 0;
+  let phaseFixedPayment = 0; // francese: rata costante della fase
+  let phasePrincipalPart = 0; // italiano: quota capitale costante della fase
+
+  const startPhase = (idx: number) => {
+    phaseIdx = idx;
+    const monthlyRate = Math.pow(1 + phases[idx].rate / 100, 1 / 12) - 1;
+    if (isFrench) {
+      phaseFixedPayment = frenchMonthlyPayment(remaining, monthlyRate, phases[idx].months);
+    } else {
+      phasePrincipalPart = phases[idx].months > 0 ? remaining / phases[idx].months : remaining;
+    }
+  };
+  startPhase(0);
+
+  // Prima rata: giorno della rata del mese successivo all'erogazione
+  const firstMonth = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+  const firstDay = Math.min(dom, new Date(firstMonth.getFullYear(), firstMonth.getMonth() + 1, 0).getDate());
+  let current = new Date(firstMonth.getFullYear(), firstMonth.getMonth(), firstDay);
+
+  const MAX_MONTHS = 1200; // tappetino di sicurezza (100 anni)
+  let count = 0;
+
+  while (remaining > 0.005 && count < MAX_MONTHS) {
+    count++;
+    const dateStr = timelineDateIso(current);
+
+    // Fase attiva: ultima rinegoziazione con data <= rata corrente
+    let activePhase = phaseIdx;
+    for (let i = phases.length - 1; i >= 0; i--) {
+      if (phases[i].date <= dateStr) {
+        activePhase = i;
+        break;
+      }
+    }
+    if (activePhase !== phaseIdx) startPhase(activePhase);
+
+    const monthlyRate = Math.pow(1 + phases[phaseIdx].rate / 100, 1 / 12) - 1;
+    const interest = remaining * monthlyRate;
+
+    let principalPart = isFrench ? phaseFixedPayment - interest : phasePrincipalPart;
+    if (principalPart < 0) principalPart = 0;
+    if (principalPart > remaining) principalPart = remaining;
+
+    let extraApplied = 0;
+    if (extra > 0) {
+      extraApplied = Math.min(extra, remaining - principalPart);
+      if (extraApplied < 0) extraApplied = 0;
+    }
+
+    const totalPrincipalPart = principalPart + extraApplied;
+    const payment = totalPrincipalPart + interest;
+
+    remaining = Math.max(0, remaining - totalPrincipalPart);
+    totalPaid += payment;
+    totalInterest += interest;
+    totalPrincipal += totalPrincipalPart;
+
+    rows.push({ date: dateStr, payment, principal: totalPrincipalPart, interest, remaining, phase: phaseIdx });
+
+    // Avanza al mese successivo
+    const nextMonth = current.getMonth() + 1;
+    const nextYear = current.getFullYear() + Math.floor(nextMonth / 12);
+    const nextMonthIdx = nextMonth % 12;
+    const nextDay = Math.min(dom, new Date(nextYear, nextMonthIdx + 1, 0).getDate());
+    current = new Date(nextYear, nextMonthIdx, nextDay);
+  }
+
+  const todayIso = timelineDateIso(new Date());
+  const initialMonthlyPayment = rows.length > 0 ? rows[0].payment : 0;
+
+  let currentMonthlyPayment = initialMonthlyPayment;
+  let currentRatePercent = phases[0].rate;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].date <= todayIso) {
+      currentMonthlyPayment = rows[i].payment;
+      currentRatePercent = phases[rows[i].phase].rate;
+      break;
+    }
+  }
+
+  const remainingAt = (dateStr: string): number => {
+    if (!dateStr) return remaining;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i].date <= dateStr) return rows[i].remaining;
+    }
+    return principal;
+  };
+
+  return {
+    rows,
+    initialMonthlyPayment,
+    currentMonthlyPayment,
+    currentRatePercent,
+    totalPaid,
+    totalInterest,
+    totalPrincipal,
+    payoffDate: rows.length > 0 ? rows[rows.length - 1].date : null,
+    remainingAt,
+  };
+}

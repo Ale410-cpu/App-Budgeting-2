@@ -153,6 +153,9 @@ export const ReimbursementSchedulePanel: React.FC<ReimbursementSchedulePanelProp
           <h4 style={{ margin: '4px 0 0 0' }}>
             {stats.pendingCount} {stats.pendingCount === 1 ? 'spesa in attesa' : 'spese in attesa'} di rimborso ({formatEuro(stats.totalPending)})
           </h4>
+          <p style={{ margin: '4px 0 0 0', fontSize: '0.72rem', color: 'var(--muted)' }}>
+            🔔 Ritardi, scadenze odierne e scadenze a breve vengono segnalati anche con una notifica di sistema (se attiva nel Centro Notifiche dell'app).
+          </p>
         </div>
 
         <button

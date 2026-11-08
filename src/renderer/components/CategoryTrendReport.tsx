@@ -25,6 +25,365 @@ export function isTransferCategory(category?: string, subcategory?: string): boo
   return keywords.some((kw) => cat.includes(kw) || sub.includes(kw));
 }
 
+type MonthSlot = { key: string; label: string; fullLabel: string; year: number; month: number };
+
+export type MonthlyTrendPoint = {
+  key: string;
+  label: string;
+  fullLabel: string;
+  totalSpent: number;
+  txCount: number;
+  avgTx: number;
+  topSubcategories: { name: string; amount: number }[];
+  txs: Transaction[];
+  momDiffVal: number;
+  momDiffPct: number;
+  isFirst: boolean;
+};
+
+/** Ultimi 6 mesi consecutivi (mese corrente incluso). */
+const buildSixMonths = (): MonthSlot[] => {
+  const list: MonthSlot[] = [];
+  const now = new Date();
+
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const key = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const label = d.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' });
+    const fullLabel = d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
+    list.push({ key, label, fullLabel, year, month });
+  }
+  return list;
+};
+
+/** Calcola il trend mensile (spese + variazione MoM) per la categoria selezionata. */
+const computeMonthlyTrend = (transactions: Transaction[], sixMonths: MonthSlot[], selectedCategory: string) => {
+  const isAll = selectedCategory === 'all';
+
+  const monthData = sixMonths.map((m) => {
+    const txsInMonth = transactions.filter((tx) => {
+      if (tx.kind !== 'expense') return false;
+      if (isTransferCategory(tx.category, tx.subcategory)) return false;
+      if (!tx.date.startsWith(m.key)) return false;
+      if (!isAll && tx.category?.trim().toLowerCase() !== selectedCategory.toLowerCase()) {
+        return false;
+      }
+      return true;
+    });
+
+    const totalSpent = txsInMonth.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    const txCount = txsInMonth.length;
+    const avgTx = txCount > 0 ? totalSpent / txCount : 0;
+
+    // Subcategory breakdown
+    const subMap: Record<string, number> = {};
+    txsInMonth.forEach((tx) => {
+      if (isTransferCategory(tx.category, tx.subcategory)) return;
+      const sub = tx.subcategory?.trim() || 'Non specificata';
+      subMap[sub] = (subMap[sub] || 0) + Math.abs(tx.amount);
+    });
+
+    const topSubcategories = Object.entries(subMap)
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return {
+      ...m,
+      totalSpent,
+      txCount,
+      avgTx,
+      topSubcategories,
+      txs: txsInMonth.sort((a, b) => b.date.localeCompare(a.date)),
+    };
+  });
+
+  // Compute Month-over-Month (MoM) variations
+  const enrichedMonths: MonthlyTrendPoint[] = monthData.map((curr, idx) => {
+    if (idx === 0) {
+      return {
+        ...curr,
+        momDiffVal: 0,
+        momDiffPct: 0,
+        isFirst: true,
+      };
+    }
+
+    const prev = monthData[idx - 1];
+    const momDiffVal = curr.totalSpent - prev.totalSpent;
+    let momDiffPct = 0;
+
+    if (prev.totalSpent > 0) {
+      momDiffPct = ((curr.totalSpent - prev.totalSpent) / prev.totalSpent) * 100;
+    } else if (curr.totalSpent > 0) {
+      momDiffPct = 100; // New expense appeared
+    }
+
+    return {
+      ...curr,
+      momDiffVal,
+      momDiffPct,
+      isFirst: false,
+    };
+  });
+
+  // Summary statistics
+  const totalSpent6M = enrichedMonths.reduce((sum, m) => sum + m.totalSpent, 0);
+  const avgMonthly = totalSpent6M / 6;
+
+  let peakMonth = enrichedMonths[0];
+  enrichedMonths.forEach((m) => {
+    if (m.totalSpent > peakMonth.totalSpent) {
+      peakMonth = m;
+    }
+  });
+
+  const latestMonth = enrichedMonths[enrichedMonths.length - 1];
+  const prevMonth = enrichedMonths[enrichedMonths.length - 2];
+
+  const latestVsAvgDiff = latestMonth ? latestMonth.totalSpent - avgMonthly : 0;
+  const latestVsAvgPct = avgMonthly > 0 ? (latestVsAvgDiff / avgMonthly) * 100 : 0;
+
+  return {
+    months: enrichedMonths,
+    totalSpent6M,
+    avgMonthly,
+    peakMonth,
+    latestMonth,
+    prevMonth,
+    latestVsAvgDiff,
+    latestVsAvgPct,
+  };
+};
+
+/**
+ * Hook con i dati del trend mensile: usato sia dal report completo
+ * sia dalla Panoramica per mostrare lo stesso grafico.
+ */
+export function useMonthlyTrend(transactions: Transaction[], selectedCategory: string = 'all') {
+  const sixMonths = useMemo(() => buildSixMonths(), []);
+
+  const trendData = useMemo(
+    () => computeMonthlyTrend(transactions, sixMonths, selectedCategory),
+    [sixMonths, transactions, selectedCategory]
+  );
+
+  const maxVal = Math.max(1, ...trendData.months.map((m) => m.totalSpent));
+
+  return {
+    months: trendData.months,
+    maxVal,
+    avgMonthly: trendData.avgMonthly,
+    peakTotal: trendData.peakMonth.totalSpent,
+    totalSpent6M: trendData.totalSpent6M,
+  };
+}
+
+interface MonthlyTrendChartProps {
+  months: MonthlyTrendPoint[];
+  maxVal: number;
+  avgMonthly: number;
+  peakTotal: number;
+  formatEuro: (val: number) => string;
+  hoveredMonthKey?: string | null;
+  onHoverMonth?: (key: string | null) => void;
+}
+
+/**
+ * Grafico a istogramma mensile con indicatore MoM.
+ * Riutilizzabile in più pagine (Report e Panoramica).
+ */
+export const MonthlyTrendChart: React.FC<MonthlyTrendChartProps> = ({
+  months,
+  maxVal,
+  avgMonthly,
+  peakTotal,
+  formatEuro,
+  hoveredMonthKey: controlledHoveredKey,
+  onHoverMonth,
+}) => {
+  const [internalHoveredKey, setInternalHoveredKey] = useState<string | null>(null);
+  const isControlled = controlledHoveredKey !== undefined;
+  const hoveredMonthKey = isControlled ? controlledHoveredKey : internalHoveredKey;
+
+  const setHoveredMonthKey = (key: string | null) => {
+    if (!isControlled) {
+      setInternalHoveredKey(key);
+    }
+    onHoverMonth?.(key);
+  };
+
+  const chartHeight = 220;
+
+  return (
+    <div style={{ padding: '20px', borderRadius: '14px', background: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>
+            Grafico Istogramma Mensile con Indicatore MoM
+          </span>
+          <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
+            (Passa sopra alle barre per i dettagli)
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.74rem', color: 'var(--muted)' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-6)' }} />
+            Spesa del Mese
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--warning)' }} />
+            Mese di Picco
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '18px', height: '2px', borderTop: '2px dashed var(--chart-axis)' }} />
+            Media 6 Mesi ({formatEuro(avgMonthly)})
+          </span>
+        </div>
+      </div>
+
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <svg viewBox={`0 0 640 ${chartHeight}`} style={{ width: '100%', minWidth: 'min(480px, 100%)', height: 'auto', overflow: 'visible' }}>
+          {/* Average Baseline Line */}
+          {(() => {
+            const avgY = chartHeight - 50 - (avgMonthly / maxVal) * (chartHeight - 85);
+            return (
+              <g>
+                <line
+                  x1="30"
+                  y1={avgY}
+                  x2="610"
+                  y2={avgY}
+                  stroke="var(--chart-axis)"
+                  strokeWidth="1.5"
+                  strokeDasharray="4,4"
+                  opacity="0.6"
+                />
+                <text
+                  x="615"
+                  y={avgY + 4}
+                  fill="var(--chart-axis)"
+                  fontSize="9"
+                  fontWeight="600"
+                  textAnchor="start"
+                >
+                  Media
+                </text>
+              </g>
+            );
+          })()}
+
+          {/* 6 Monthly Bars */}
+          {months.map((m, idx) => {
+            const colWidth = 60;
+            const gap = (600 - 6 * colWidth) / 5;
+            const x = 30 + idx * (colWidth + gap);
+            const usableHeight = chartHeight - 85;
+            const barHeight = maxVal > 0 ? Math.max(4, (m.totalSpent / maxVal) * usableHeight) : 4;
+            const y = chartHeight - 50 - barHeight;
+
+            const isPeak = m.totalSpent === peakTotal && m.totalSpent > 0;
+            const isHovered = hoveredMonthKey === m.key;
+            const barColor = isPeak ? 'var(--warning)' : isHovered ? 'var(--chart-2)' : 'var(--chart-6)';
+
+            return (
+              <g
+                key={`bar-${m.key}`}
+                onMouseEnter={() => setHoveredMonthKey(m.key)}
+                onMouseLeave={() => setHoveredMonthKey(null)}
+                style={{ cursor: 'pointer' }}
+              >
+                {/* Background hover pillar */}
+                <rect
+                  x={x - 8}
+                  y={10}
+                  width={colWidth + 16}
+                  height={chartHeight - 30}
+                  fill={isHovered ? 'var(--overlay-medium)' : 'transparent'}
+                  rx={8}
+                  style={{ transition: 'fill 0.15s ease' }}
+                />
+
+                {/* Bar */}
+                <rect
+                  x={x}
+                  y={y}
+                  width={colWidth}
+                  height={barHeight}
+                  fill={barColor}
+                  rx={6}
+                  style={{ transition: 'all 0.2s ease' }}
+                />
+
+                {/* Direct Euro Label on top of Bar */}
+                <text
+                  x={x + colWidth / 2}
+                  y={y - 8}
+                  fill={isPeak ? 'var(--warning)' : 'var(--text)'}
+                  fontSize="11"
+                  fontWeight="700"
+                  textAnchor="middle"
+                  fontFamily="var(--font-mono)"
+                >
+                  {formatEuro(m.totalSpent)}
+                </text>
+
+                {/* Month Label below Bar */}
+                <text
+                  x={x + colWidth / 2}
+                  y={chartHeight - 34}
+                  fill={isHovered ? 'var(--text)' : 'var(--muted)'}
+                  fontSize="11"
+                  fontWeight={isHovered ? 700 : 600}
+                  textAnchor="middle"
+                >
+                  {m.label}
+                </text>
+
+                {/* MoM % Change Badge below Month Label */}
+                {!m.isFirst ? (
+                  <g>
+                    <rect
+                      x={x + colWidth / 2 - 28}
+                      y={chartHeight - 26}
+                      width="56"
+                      height="16"
+                      rx="4"
+                      fill={m.momDiffVal > 0 ? 'var(--danger-soft)' : m.momDiffVal < 0 ? 'var(--success-soft)' : 'var(--overlay-medium)'}
+                    />
+                    <text
+                      x={x + colWidth / 2}
+                      y={chartHeight - 14}
+                      fill={m.momDiffVal > 0 ? 'var(--chart-negative)' : m.momDiffVal < 0 ? 'var(--chart-positive)' : 'var(--muted)'}
+                      fontSize="9.5"
+                      fontWeight="750"
+                      textAnchor="middle"
+                      fontFamily="var(--font-mono)"
+                    >
+                      {m.momDiffVal > 0 ? `↑ +${m.momDiffPct.toFixed(0)}%` : m.momDiffVal < 0 ? `↓ ${m.momDiffPct.toFixed(0)}%` : '0%'}
+                    </text>
+                  </g>
+                ) : (
+                  <text
+                    x={x + colWidth / 2}
+                    y={chartHeight - 14}
+                    fill="var(--muted)"
+                    fontSize="8.5"
+                    textAnchor="middle"
+                  >
+                    (Base)
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+};
+
 interface CategoryTrendReportProps {
   transactions: Transaction[];
   formatEuro: (val: number) => string;
@@ -37,21 +396,7 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
   formatSignedEuro,
 }) => {
   // Generate the 6 consecutive calendar months ending with current month
-  const sixMonths = useMemo(() => {
-    const list: { key: string; label: string; fullLabel: string; year: number; month: number }[] = [];
-    const now = new Date();
-
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = d.getFullYear();
-      const month = d.getMonth();
-      const key = `${year}-${String(month + 1).padStart(2, '0')}`;
-      const label = d.toLocaleDateString('it-IT', { month: 'short', year: '2-digit' });
-      const fullLabel = d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' });
-      list.push({ key, label, fullLabel, year, month });
-    }
-    return list;
-  }, []);
+  const sixMonths = useMemo(() => buildSixMonths(), []);
 
   // Discover all expense categories and compute their 6-month totals to find the most relevant ones (excluding internal transfers)
   const { allCategories, categoryTotals6M, topCategories } = useMemo(() => {
@@ -79,111 +424,16 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
     };
   }, [transactions, sixMonths]);
 
-  // Selected category (default to top 1 spending category or 'all')
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => {
-    return allCategories.length > 0 ? allCategories[0] : 'all';
-  });
+  // Selected category (default to 'all' — global spending trend)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   const [hoveredMonthKey, setHoveredMonthKey] = useState<string | null>(null);
 
   // Compute 6-month trend data for selected category
-  const trendData = useMemo(() => {
-    const isAll = selectedCategory === 'all';
-
-    const monthData = sixMonths.map((m, idx) => {
-      const txsInMonth = transactions.filter((tx) => {
-        if (tx.kind !== 'expense') return false;
-        if (isTransferCategory(tx.category, tx.subcategory)) return false;
-        if (!tx.date.startsWith(m.key)) return false;
-        if (!isAll && tx.category?.trim().toLowerCase() !== selectedCategory.toLowerCase()) {
-          return false;
-        }
-        return true;
-      });
-
-      const totalSpent = txsInMonth.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
-      const txCount = txsInMonth.length;
-      const avgTx = txCount > 0 ? totalSpent / txCount : 0;
-
-      // Subcategory breakdown
-      const subMap: Record<string, number> = {};
-      txsInMonth.forEach((tx) => {
-        if (isTransferCategory(tx.category, tx.subcategory)) return;
-        const sub = tx.subcategory?.trim() || 'Non specificata';
-        subMap[sub] = (subMap[sub] || 0) + Math.abs(tx.amount);
-      });
-
-      const topSubcategories = Object.entries(subMap)
-        .map(([name, amount]) => ({ name, amount }))
-        .sort((a, b) => b.amount - a.amount);
-
-      return {
-        ...m,
-        totalSpent,
-        txCount,
-        avgTx,
-        topSubcategories,
-        txs: txsInMonth.sort((a, b) => b.date.localeCompare(a.date)),
-      };
-    });
-
-    // Compute Month-over-Month (MoM) variations
-    const enrichedMonths = monthData.map((curr, idx) => {
-      if (idx === 0) {
-        return {
-          ...curr,
-          momDiffVal: 0,
-          momDiffPct: 0,
-          isFirst: true,
-        };
-      }
-
-      const prev = monthData[idx - 1];
-      const momDiffVal = curr.totalSpent - prev.totalSpent;
-      let momDiffPct = 0;
-
-      if (prev.totalSpent > 0) {
-        momDiffPct = ((curr.totalSpent - prev.totalSpent) / prev.totalSpent) * 100;
-      } else if (curr.totalSpent > 0) {
-        momDiffPct = 100; // New expense appeared
-      }
-
-      return {
-        ...curr,
-        momDiffVal,
-        momDiffPct,
-        isFirst: false,
-      };
-    });
-
-    // Summary statistics
-    const totalSpent6M = enrichedMonths.reduce((sum, m) => sum + m.totalSpent, 0);
-    const avgMonthly = totalSpent6M / 6;
-
-    let peakMonth = enrichedMonths[0];
-    enrichedMonths.forEach((m) => {
-      if (m.totalSpent > peakMonth.totalSpent) {
-        peakMonth = m;
-      }
-    });
-
-    const latestMonth = enrichedMonths[enrichedMonths.length - 1];
-    const prevMonth = enrichedMonths[enrichedMonths.length - 2];
-
-    const latestVsAvgDiff = latestMonth ? latestMonth.totalSpent - avgMonthly : 0;
-    const latestVsAvgPct = avgMonthly > 0 ? (latestVsAvgDiff / avgMonthly) * 100 : 0;
-
-    return {
-      months: enrichedMonths,
-      totalSpent6M,
-      avgMonthly,
-      peakMonth,
-      latestMonth,
-      prevMonth,
-      latestVsAvgDiff,
-      latestVsAvgPct,
-    };
-  }, [sixMonths, transactions, selectedCategory]);
+  const trendData = useMemo(
+    () => computeMonthlyTrend(transactions, sixMonths, selectedCategory),
+    [sixMonths, transactions, selectedCategory]
+  );
 
   // Comparative ranking of all categories by MoM change (identifying where user is spending more)
   const categoryMoMRanking = useMemo(() => {
@@ -252,7 +502,6 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
   }, [allCategories, sixMonths, transactions]);
 
   // Chart layout dimensions
-  const chartHeight = 220;
   const maxVal = Math.max(1, ...trendData.months.map((m) => m.totalSpent));
 
   return (
@@ -410,170 +659,15 @@ export const CategoryTrendReport: React.FC<CategoryTrendReportProps> = ({
         </div>
 
         {/* SVG Interactive Trend Chart */}
-        <div style={{ padding: '20px', borderRadius: '14px', background: 'var(--overlay-subtle)', border: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>
-                Grafico Istogramma Mensile con Indicatore MoM
-              </span>
-              <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>
-                (Passa sopra alle barre per i dettagli)
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.74rem', color: 'var(--muted)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--chart-6)' }} />
-                Spesa del Mese
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: 'var(--warning)' }} />
-                Mese di Picco
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ width: '18px', height: '2px', borderTop: '2px dashed var(--chart-axis)' }} />
-                Media 6 Mesi ({formatEuro(trendData.avgMonthly)})
-              </span>
-            </div>
-          </div>
-
-          <div style={{ width: '100%', overflowX: 'auto' }}>
-            <svg viewBox={`0 0 640 ${chartHeight}`} style={{ width: '100%', minWidth: 'min(480px, 100%)', height: 'auto', overflow: 'visible' }}>
-              {/* Average Baseline Line */}
-              {(() => {
-                const avgY = chartHeight - 50 - (trendData.avgMonthly / maxVal) * (chartHeight - 85);
-                return (
-                  <g>
-                    <line
-                      x1="30"
-                      y1={avgY}
-                      x2="610"
-                      y2={avgY}
-                      stroke="var(--chart-axis)"
-                      strokeWidth="1.5"
-                      strokeDasharray="4,4"
-                      opacity="0.6"
-                    />
-                    <text
-                      x="615"
-                      y={avgY + 4}
-                      fill="var(--chart-axis)"
-                      fontSize="9"
-                      fontWeight="600"
-                      textAnchor="start"
-                    >
-                      Media
-                    </text>
-                  </g>
-                );
-              })()}
-
-              {/* 6 Monthly Bars */}
-              {trendData.months.map((m, idx) => {
-                const colWidth = 60;
-                const gap = (600 - 6 * colWidth) / 5;
-                const x = 30 + idx * (colWidth + gap);
-                const usableHeight = chartHeight - 85;
-                const barHeight = maxVal > 0 ? Math.max(4, (m.totalSpent / maxVal) * usableHeight) : 4;
-                const y = chartHeight - 50 - barHeight;
-
-                const isPeak = m.totalSpent === trendData.peakMonth.totalSpent && m.totalSpent > 0;
-                const isHovered = hoveredMonthKey === m.key;
-                const barColor = isPeak ? 'var(--warning)' : isHovered ? 'var(--chart-2)' : 'var(--chart-6)';
-
-                return (
-                  <g
-                    key={`bar-${m.key}`}
-                    onMouseEnter={() => setHoveredMonthKey(m.key)}
-                    onMouseLeave={() => setHoveredMonthKey(null)}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    {/* Background hover pillar */}
-                    <rect
-                      x={x - 8}
-                      y={10}
-                      width={colWidth + 16}
-                      height={chartHeight - 30}
-                      fill={isHovered ? 'var(--overlay-medium)' : 'transparent'}
-                      rx={8}
-                      style={{ transition: 'fill 0.15s ease' }}
-                    />
-
-                    {/* Bar */}
-                    <rect
-                      x={x}
-                      y={y}
-                      width={colWidth}
-                      height={barHeight}
-                      fill={barColor}
-                      rx={6}
-                      style={{ transition: 'all 0.2s ease' }}
-                    />
-
-                    {/* Direct Euro Label on top of Bar */}
-                    <text
-                      x={x + colWidth / 2}
-                      y={y - 8}
-                      fill={isPeak ? 'var(--warning)' : 'var(--text)'}
-                      fontSize="11"
-                      fontWeight="700"
-                      textAnchor="middle"
-                      fontFamily="var(--font-mono)"
-                    >
-                      {formatEuro(m.totalSpent)}
-                    </text>
-
-                    {/* Month Label below Bar */}
-                    <text
-                      x={x + colWidth / 2}
-                      y={chartHeight - 34}
-                      fill={isHovered ? 'var(--text)' : 'var(--muted)'}
-                      fontSize="11"
-                      fontWeight={isHovered ? 700 : 600}
-                      textAnchor="middle"
-                    >
-                      {m.label}
-                    </text>
-
-                    {/* MoM % Change Badge below Month Label */}
-                    {!m.isFirst ? (
-                      <g>
-                        <rect
-                          x={x + colWidth / 2 - 28}
-                          y={chartHeight - 26}
-                          width="56"
-                          height="16"
-                          rx="4"
-                          fill={m.momDiffVal > 0 ? 'var(--danger-soft)' : m.momDiffVal < 0 ? 'var(--success-soft)' : 'var(--overlay-medium)'}
-                        />
-                        <text
-                          x={x + colWidth / 2}
-                          y={chartHeight - 14}
-                          fill={m.momDiffVal > 0 ? 'var(--chart-negative)' : m.momDiffVal < 0 ? 'var(--chart-positive)' : 'var(--muted)'}
-                          fontSize="9.5"
-                          fontWeight="750"
-                          textAnchor="middle"
-                          fontFamily="var(--font-mono)"
-                        >
-                          {m.momDiffVal > 0 ? `↑ +${m.momDiffPct.toFixed(0)}%` : m.momDiffVal < 0 ? `↓ ${m.momDiffPct.toFixed(0)}%` : '0%'}
-                        </text>
-                      </g>
-                    ) : (
-                      <text
-                        x={x + colWidth / 2}
-                        y={chartHeight - 14}
-                        fill="var(--muted)"
-                        fontSize="8.5"
-                        textAnchor="middle"
-                      >
-                        (Base)
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-        </div>
+        <MonthlyTrendChart
+          months={trendData.months}
+          maxVal={maxVal}
+          avgMonthly={trendData.avgMonthly}
+          peakTotal={trendData.peakMonth.totalSpent}
+          formatEuro={formatEuro}
+          hoveredMonthKey={hoveredMonthKey}
+          onHoverMonth={setHoveredMonthKey}
+        />
 
         {/* Detailed 6-Month Data Table */}
         <div style={{ marginTop: '20px' }}>

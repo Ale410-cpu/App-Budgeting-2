@@ -81,6 +81,15 @@ finestra si riapre.
 Le notifiche arrivano **sul Mac**, nel Notification Center (icona in alto a destra),
 e non come banner dentro l'app.
 
+### Cosa viene segnalato
+
+- **Budget**: avviso quando una categoria raggiunge l'80% e il 100% del limite mensile.
+- **Ricorrenti**: scadenza del giorno per abbonamenti e uscite periodiche.
+- **Rimborsi**: sollecito quando una spesa "da rimborsare" è in ritardo sulla data concordata, scade oggi o scade entro 7 giorni; conferma dell'incasso quando registri un rimborso (parziale o completo).
+- **Transazioni**: promemoria periodico per registrare scontrini e movimenti recenti.
+
+Ogni avviso è attivabile o disattivabile singolarmente dal Centro Notifiche dell'app (icona 🔔).
+
 ### Canale di consegna
 
 | Canale | Quando | Comportamento |

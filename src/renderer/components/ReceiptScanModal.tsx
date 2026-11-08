@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Camera, ClipboardPaste, Receipt, ScanLine, X } from 'lucide-react';
 import { parseReceiptText, type ReceiptScanResult } from '../utils/receiptParser';
+import { AutocompleteInput } from './AutocompleteInput';
 
 /** Dati che il modulo consegna ad App.tsx per creare la transazione. */
 export interface ReceiptDraft {
@@ -437,20 +438,22 @@ export const ReceiptScanModal: React.FC<ReceiptScanModalProps> = ({
               </label>
               <label className="form-field">
                 <span>Categoria</span>
-                <input
+                <AutocompleteInput
                   value={draft.category}
-                  list="receipt-category-options"
-                  onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value }))}
+                  onChange={(value) => setDraft((current) => ({ ...current, category: value }))}
+                  options={categoryOptions}
                   placeholder="Categoria budget"
+                  ariaLabel="Categoria"
                 />
               </label>
               <label className="form-field">
                 <span>Conto</span>
-                <input
+                <AutocompleteInput
                   value={draft.account}
-                  list="receipt-account-options"
-                  onChange={(event) => setDraft((current) => ({ ...current, account: event.target.value }))}
+                  onChange={(value) => setDraft((current) => ({ ...current, account: value }))}
+                  options={accountOptions}
                   placeholder="Conto"
+                  ariaLabel="Conto"
                 />
               </label>
               <label className="form-field">
@@ -462,17 +465,6 @@ export const ReceiptScanModal: React.FC<ReceiptScanModalProps> = ({
                 />
               </label>
             </div>
-
-            <datalist id="receipt-category-options">
-              {categoryOptions.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
-            <datalist id="receipt-account-options">
-              {accountOptions.map((option) => (
-                <option key={option} value={option} />
-              ))}
-            </datalist>
 
             {/* Righe riconosciute */}
             {scan.items.length > 0 && (

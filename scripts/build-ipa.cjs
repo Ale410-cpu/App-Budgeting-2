@@ -40,6 +40,15 @@ const TEAM_FLAG_INDEX = args.indexOf('--team');
 const TEAM_ID =
   (TEAM_FLAG_INDEX >= 0 ? args[TEAM_FLAG_INDEX + 1] : process.env.IOS_TEAM_ID || '').trim();
 
+// Il Team ID finisce dentro comandi shell (xcodebuild via execSync): accetta
+// solo il formato Apple (10 caratteri alfanumerici) per evitare injection.
+if (TEAM_ID && !/^[A-Za-z0-9]{10}$/.test(TEAM_ID)) {
+  fail(
+    `Team ID non valido: "${TEAM_ID}"`,
+    'Il Team ID Apple è composto da 10 caratteri alfanumerici (Xcode > Settings > Accounts).'
+  );
+}
+
 const APP_NAME = 'BudgetApp';
 
 function log(message) {
@@ -119,12 +128,13 @@ function requireXcode() {
  */
 const IOS_CSP = [
   "default-src 'self' budgetapp: data: blob: file:;",
-  "script-src 'self' budgetapp: 'unsafe-inline' 'unsafe-eval' blob:;",
+  "script-src 'self' budgetapp: 'unsafe-inline' blob:;",
   "worker-src 'self' budgetapp: blob: file:;",
   "style-src 'self' budgetapp: 'unsafe-inline' https://fonts.googleapis.com;",
-  "font-src 'self' budgetapp: data: file:;",
-  "img-src 'self' budgetapp: data: blob: file: https:;",
-  "connect-src 'self' budgetapp: https://query1.finance.yahoo.com https://api.github.com https://github.com https://objects.githubusercontent.com ws: wss: http://localhost:* http://127.0.0.1:*;",
+  "font-src 'self' budgetapp: data: file: https://fonts.gstatic.com;",
+  "img-src 'self' budgetapp: data: blob: file:;",
+  "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self';",
+  "connect-src 'self' budgetapp: https://query1.finance.yahoo.com https://api.github.com https://github.com https://objects.githubusercontent.com;",
 ].join(' ');
 
 /**

@@ -130,10 +130,14 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
         webView.scrollView.contentInsetAdjustmentBehavior = .always
+        #if DEBUG
         if #available(iOS 16.4, *) {
-            // Utile per il debug da Safari su iPhone (Web Inspector).
+            // Utile per il debug da Safari su iPhone (Web Inspector):
+            // solo nelle build di sviluppo, le release non devono essere
+            // ispezionabili da un Mac associato.
             webView.isInspectable = true
         }
+        #endif
 
         bridge.webView = webView
         bridge.activate()
@@ -161,17 +165,6 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         webView.load(URLRequest(url: AppSchemeHandler.startURL))
         hasLoadedWebContent = true
         NSLog("[BudgetApp] avvio: caricamento %@ (root: %@)", AppSchemeHandler.startURL.absoluteString, schemeHandler.rootPath)
-
-        // Diagnostica di avvio: riporta nel log cosa ha effettivamente
-        // renderizzato la WebView.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-            bridge.debugEval(
-                "JSON.stringify({ root: (document.getElementById('root')||{}).childElementCount || -1,"
-                + " text: (document.body.innerText||'').slice(0,260),"
-                + " scripts: document.scripts.length,"
-                + " style: document.styleSheets.length })"
-            )
-        }
     }
 }
 
@@ -197,14 +190,18 @@ extension AppDelegate: WKNavigationDelegate {
             return
         }
 
-        // I link esterni (GitHub, documentazione...) si aprono nel browser.
-        if navigationAction.navigationType == .linkActivated {
+        // Qualsiasi altra navigazione NON deve caricarsi dentro la WebView:
+        // i message handler del bridge (loadData/saveData/...) sono raggiungibili
+        // da qualsiasi pagina caricata nel webview, quindi un sito remoto
+        // potrebbe leggere o sovrascrivere i dati finanziari dell'utente.
+        // I link attivati dall'utente (http/https) si aprono nel browser di sistema.
+        if navigationAction.navigationType == .linkActivated,
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http" || scheme == "https",
+           let host = url.host, !host.isEmpty {
             UIApplication.shared.open(url, options: [:])
-            decisionHandler(.cancel)
-            return
         }
-
-        decisionHandler(.allow)
+        decisionHandler(.cancel)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

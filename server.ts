@@ -22,7 +22,7 @@ async function startServer() {
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://query1.finance.yahoo.com ws: wss:; frame-ancestors 'self' *;"
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; connect-src 'self' https://query1.finance.yahoo.com https://api.github.com https://github.com https://objects.githubusercontent.com ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*;"
     );
     next();
   });
@@ -377,13 +377,19 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    // Express 5 (path-to-regexp v8) non accetta più il wildcard '*' nelle
+    // route: la SPA fallback va registrata come middleware finale.
+    app.use((req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  // Local-first server: bind to loopback by default so the API proxy is not
+  // reachable from the LAN. Set HOST=0.0.0.0 explicitly when deploying the
+  // web build on a public host.
+  const host = process.env.HOST || '127.0.0.1';
+  app.listen(PORT, host, () => {
+    console.log(`Server running on http://${host}:${PORT}`);
   });
 }
 

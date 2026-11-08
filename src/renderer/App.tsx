@@ -6,15 +6,24 @@ import { NetWorthHistoryChart } from './components/NetWorthHistoryChart';
 import { AssetAllocationPanel, isAssetBondEtf, isAssetEquityEtf } from './components/AssetAllocationPanel';
 import { SimulationsPage } from './components/SimulationsPage';
 import { ReimbursementSchedulePanel } from './components/ReimbursementSchedulePanel';
-import { CategoryTrendReport } from './components/CategoryTrendReport';
+import { CategoryTrendReport, MonthlyTrendChart, useMonthlyTrend } from './components/CategoryTrendReport';
 import { CashbackManager, type CashbackRule, type NewAssetPayload } from './components/CashbackManager';
 import { UpdateModal } from './components/UpdateModal';
 import { ImportDataModal } from './components/ImportDataModal';
 import { ReceiptScanModal, type ReceiptDraft } from './components/ReceiptScanModal';
+import { AutocompleteInput } from './components/AutocompleteInput';
 import { NotificationModal } from './components/NotificationModal';
 import { APP_VERSION } from '../version';
-import { checkAndTriggerFinancialAlerts, checkTransactionReminder, type AppNotification } from './utils/notificationService';
+import {
+  checkAndTriggerFinancialAlerts,
+  checkTransactionReminder,
+  checkAndTriggerReimbursementAlerts,
+  sendReimbursementReceivedNotification,
+  type AppNotification,
+  type ReimbursementAlertItem,
+} from './utils/notificationService';
 import { computeAssetPerformance } from './utils/assetFinancials';
+import { simulateMortgageTimeline, type AmortizationType } from './utils/financeSim';
 import { saveGeneratedFile } from './utils/fileSave';
 import type { ParsedTransaction } from './utils/smartFileParser';
 import type { DataFileInfo, UpdateCheckResult, UpdateProgress } from './global';
@@ -297,6 +306,39 @@ type PAC = {
   createAssetTransaction?: boolean;
 };
 
+type MortgageRenegotiation = {
+  id: string;
+  date: string; // YYYY-MM-DD data di applicazione della rinegoziazione
+  newAnnualRatePercent: number;
+  newRemainingYears: number;
+  costs: number; // spese sostenute per la rinegoziazione
+  notes: string;
+  createdAt: number;
+};
+
+type Mortgage = {
+  id: string;
+  name: string;
+  bank: string;
+  principal: number; // capitale inizialmente erogato
+  startDate: string; // YYYY-MM-DD data di erogazione / inizio piano
+  years: number; // durata originaria in anni
+  annualRatePercent: number; // TAN annuo originario
+  type: AmortizationType; // 'french' (rata costante) | 'italian' (capitale costante)
+  installmentDay: number; // 1-31, giorno del mese della rata
+  account: string;
+  category: string;
+  subcategory: string;
+  extraMonthlyPayment: number; // versamento extra mensile (accelerazione estinzione)
+  initialCosts: number; // spese iniziali (notarile, imposte, perizia...)
+  isActive: boolean;
+  autoPost: boolean; // inserimento automatico delle rate
+  notes: string;
+  createdAt: number;
+  lastPostedDate?: string; // YYYY-MM-DD ultima rata registrata automaticamente
+  renegotiations: MortgageRenegotiation[];
+};
+
 type SectionId = 'dashboard' | 'transazioni' | 'budget' | 'report' | 'patrimonio' | 'attivita' | 'ricorrenti' | 'simulazioni' | 'impostazioni';
 
 type SectionConfig = {
@@ -316,6 +358,7 @@ const OPENING_NET_WORTH_STORAGE_KEY = 'budget-ledger-opening-net-worth-v1';
 const OPENING_DATE_STORAGE_KEY = 'budget-ledger-opening-date-v1';
 const RECURRING_TX_STORAGE_KEY = 'budget-ledger-recurring-transactions-v1';
 const PAC_STORAGE_KEY = 'budget-ledger-pac-v1';
+const MORTGAGE_STORAGE_KEY = 'budget-ledger-mortgages-v1';
 const SUBSCRIPTION_STORAGE_KEY = 'budget-ledger-subscriptions-v1';
 const ACCOUNT_INITIAL_CAPITALS_STORAGE_KEY = 'budget-ledger-account-initial-capitals-v1';
 const HIDE_NUMBERS_STORAGE_KEY = 'budget-ledger-hide-numbers-v1';
@@ -432,9 +475,9 @@ const sections: SectionConfig[] = [
   },
   {
     id: 'ricorrenti',
-    label: 'Ricorrenti, PAC & Cashback',
-    title: 'Transazioni Ricorrenti, PAC & Cashback',
-    description: 'Pianifica entrate/uscite periodiche, Piani di Accumulo Capitale (PAC) e regole di Cashback & Saveback automatico.',
+    label: 'Ricorrenti, PAC, Mutui & Cashback',
+    title: 'Transazioni Ricorrenti, PAC, Mutui & Cashback',
+    description: 'Pianifica entrate/uscite periodiche, Piani di Accumulo Capitale (PAC), mutui con rinegoziazioni e regole di Cashback & Saveback automatico.',
   },
   {
     id: 'report',
@@ -619,6 +662,69 @@ function getDueDatesForPAC(pac: PAC, todayStr: string): string[] {
 
   const uniqueSorted = Array.from(new Set(dueDates)).sort();
   return uniqueSorted.slice(0, 12);
+}
+
+/** Trasforma un mutuo salvato nell'input della simulazione della timeline (mutuo + rinegoziazioni come fasi). */
+function mortgageToTimelineInput(m: Mortgage) {
+  return {
+    principal: m.principal,
+    years: m.years,
+    annualRatePercent: m.annualRatePercent,
+    type: m.type,
+    startDate: m.startDate,
+    installmentDay: m.installmentDay,
+    extraMonthlyPayment: m.extraMonthlyPayment,
+    renegotiations: (m.renegotiations || [])
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
+      .map((r) => ({
+        date: r.date,
+        annualRatePercent: r.newAnnualRatePercent,
+        remainingYears: r.newRemainingYears,
+      })),
+  };
+}
+
+/** Date delle rate di un mutuo ancora da registrare (dall'ultimo posting fino a oggi). */
+function getDueDatesForMortgage(m: Mortgage, todayStr: string): string[] {
+  if (!m.isActive) return [];
+  const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+  const startRef = m.lastPostedDate || m.startDate;
+  return sim.rows
+    .filter((r) => r.date > startRef && r.date <= todayStr)
+    .map((r) => r.date)
+    .slice(0, 12);
+}
+
+function createEmptyMortgageDraft() {
+  return {
+    name: '',
+    bank: '',
+    principal: '',
+    startDate: getTodayIso(),
+    years: '25',
+    annualRatePercent: '3.50',
+    type: 'french' as AmortizationType,
+    installmentDay: '1',
+    account: '',
+    category: 'Casa',
+    subcategory: 'Rata mutuo',
+    extraMonthlyPayment: '',
+    initialCosts: '',
+    notes: '',
+    autoPost: true,
+  };
+}
+
+function createEmptyRenegotiationDraft() {
+  return {
+    date: getTodayIso(),
+    newAnnualRatePercent: '',
+    newRemainingYears: '',
+    costs: '',
+    recordCosts: true,
+    notes: '',
+  };
 }
 
 function getMonthStartIso() {
@@ -958,6 +1064,54 @@ function safeJsonParse<T>(raw: string, fallbackValue: T): T {
   } catch {
     return fallbackValue;
   }
+}
+
+// === Hardening: validazione URL per il flusso di auto-aggiornamento ===
+// I metadati di aggiornamento arrivano dal JSON delle release GitHub e la
+// repository è configurabile dall'utente: i link di download sono dati
+// remoti e non vanno mai fidati ciecamente.
+const ALLOWED_UPDATE_HOSTS = ['github.com', 'api.github.com', 'codeload.github.com'];
+
+/** True solo per URL HTTPS verso host GitHub (download aggiornamenti). */
+function isAllowedUpdateUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password) return false;
+    const host = parsed.hostname.toLowerCase();
+    return (
+      ALLOWED_UPDATE_HOSTS.includes(host) ||
+      host.endsWith('.github.com') ||
+      host.endsWith('.githubusercontent.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** True solo per URL http(s) (link generici aperti nel browser). */
+function isHttpUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const ACCENT_COLOR_REGEX = /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/;
+const DATA_IMAGE_PREFIX_REGEX = /^data:image\/(png|jpe?g|gif|webp|svg\+xml|bmp);base64,/i;
+const MAX_CUSTOM_LOGO_LENGTH = 2 * 1024 * 1024;
+
+/**
+ * Pulisce le stringhe dei metadati (_fileMeta) provenienti da file
+ * user-data.json importati o sincronizzati: rimuove caratteri di controllo
+ * e limita la lunghezza prima di salvare/visualizzare.
+ */
+function sanitizeMetaString(value: unknown, fallback: string, maxLength = 300): string {
+  if (typeof value !== 'string') return fallback;
+  const cleaned = value.replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, maxLength);
+  return cleaned || fallback;
 }
 
 function loadStoredValue<T>(storageKey: string, fallbackValue: T): T {
@@ -1391,6 +1545,7 @@ function TransactionEditor({
   accountOptions,
   candidateExpenses,
   allTransactions,
+  budgetCategories,
   onChange,
   onSubmit,
   onReset,
@@ -1404,6 +1559,7 @@ function TransactionEditor({
   accountOptions: string[];
   candidateExpenses: Transaction[];
   allTransactions: Transaction[];
+  budgetCategories: BudgetCategory[];
   onChange: <K extends keyof TransactionDraft>(field: K, value: TransactionDraft[K]) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
@@ -1418,6 +1574,37 @@ function TransactionEditor({
       setNewAccountName('');
     }
   }, [draft.account, accountOptions, isCustomAccount]);
+
+  // Sottocategorie suggerite nel modulo: solo quelle legate alla categoria
+  // inserita (definite nel budget o già usate in passato con la stessa
+  // categoria). Il campo resta a testo libero: inserirne una nuova è
+  // sempre possibile digitandola direttamente.
+  const normalizedCategory = draft.category.trim().toLowerCase();
+  const matchedBudgetCategory = normalizedCategory
+    ? (budgetCategories.find((category) => category.name.trim().toLowerCase() === normalizedCategory) ?? null)
+    : null;
+
+  const subcategorySuggestions = useMemo(() => {
+    if (!normalizedCategory) return subcategoryOptions;
+
+    const tied = new Set<string>();
+    matchedBudgetCategory?.subcategories.forEach((subcategory) => {
+      const name = subcategory.name.trim();
+      if (name) tied.add(name);
+    });
+    allTransactions.forEach((transaction) => {
+      if (transaction.category.trim().toLowerCase() !== normalizedCategory) return;
+      const name = transaction.subcategory.trim();
+      if (name) tied.add(name);
+    });
+
+    // Categoria non presente nel budget e mai usata: comportamento precedente.
+    if (!matchedBudgetCategory && tied.size === 0) return subcategoryOptions;
+
+    return Array.from(tied).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }));
+  }, [normalizedCategory, matchedBudgetCategory, subcategoryOptions, allTransactions]);
+
+  const showSubcategoryHint = Boolean(normalizedCategory && matchedBudgetCategory && subcategorySuggestions.length === 0);
 
   const handleConfirmNewAccount = (nameToConfirm: string) => {
     const trimmed = nameToConfirm.trim();
@@ -1488,22 +1675,29 @@ function TransactionEditor({
           </label>
           <label className="form-field">
             <span>Categoria</span>
-            <input
+            <AutocompleteInput
               value={draft.category}
-              onChange={(event) => onChange('category', event.target.value)}
+              onChange={(value) => onChange('category', value)}
+              options={categoryOptions}
               placeholder="Categoria budget"
-              list="category-options"
               required
+              ariaLabel="Categoria"
             />
           </label>
           <label className="form-field">
             <span>Sottocategoria</span>
-            <input
+            <AutocompleteInput
               value={draft.subcategory}
-              onChange={(event) => onChange('subcategory', event.target.value)}
+              onChange={(value) => onChange('subcategory', value)}
+              options={subcategorySuggestions}
               placeholder="Sottocategoria facoltativa"
-              list="subcategory-options"
+              ariaLabel="Sottocategoria"
             />
+            {showSubcategoryHint ? (
+              <span style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: '4px', display: 'block' }}>
+                Nessuna sottocategoria associata a «{draft.category.trim()}»: digita direttamente nel campo per inserirne una nuova.
+              </span>
+            ) : null}
           </label>
           <label className="form-field">
             <span>Conto</span>
@@ -1912,16 +2106,6 @@ function TransactionEditor({
         ) : null}
       </form>
 
-      <datalist id="category-options">
-        {categoryOptions.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
-      <datalist id="subcategory-options">
-        {subcategoryOptions.map((option) => (
-          <option key={option} value={option} />
-        ))}
-      </datalist>
     </article>
   );
 }
@@ -2024,7 +2208,7 @@ function BudgetCategoryEditor({
               </span>
             </div>
           </label>
-          <label className="form-field" style={{ gridColumn: 'span 2' }}>
+          <label className="form-field form-field-note">
             <span>Nota</span>
             <input value={draft.note} onChange={(event) => onChange('note', event.target.value)} placeholder="Annotazione facoltativa" />
           </label>
@@ -2049,10 +2233,7 @@ function BudgetCategoryEditor({
                   <div
                     className="subcategory-row"
                     key={subcategory.id}
-                    style={{
-                      gridTemplateColumns: 'minmax(0, 1.2fr) minmax(130px, 0.8fr) minmax(110px, 0.8fr) minmax(0, 1.2fr) auto',
-                      borderLeft: `4px solid ${draft.color || 'var(--accent)'}`,
-                    }}
+                    style={{ borderLeft: `4px solid ${draft.color || 'var(--accent)'}` }}
                   >
                     <label className="form-field">
                       <span>Nome</span>
@@ -2255,7 +2436,7 @@ function App() {
     try {
       const raw = localStorage.getItem(LINKED_FILE_INFO_STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = safeJsonParse<DataFileInfo | null>(raw, null);
         if (parsed && typeof parsed.filePath === 'string') {
           return parsed;
         }
@@ -2490,6 +2671,9 @@ function App() {
   }, []);
 
   const openUrlSafely = useCallback((url: string) => {
+    // Solo link http(s): un URL "javascript:" proveniente da metadati remoti
+    // eseguirebbe codice nel contesto dell'app (build web/PWA).
+    if (typeof url !== 'string' || !isHttpUrl(url)) return;
     if (window.budgetApp && typeof window.budgetApp.openExternal === 'function') {
       window.budgetApp.openExternal(url);
     } else {
@@ -2511,11 +2695,24 @@ function App() {
     setUpdateSuccessMessage(null);
 
     try {
-      if (window.budgetApp && typeof window.budgetApp.downloadAndInstallUpdate === 'function' && updateInfo.asset?.downloadUrl) {
+      const asset = updateInfo.asset;
+      // I metadati di aggiornamento sono dati remoti (repository configurabile
+      // dall'utente): si accettano solo URL HTTPS verso host GitHub, sia qui
+      // sia nel processo principale che scarica/installa il pacchetto.
+      const safeDownloadUrl =
+        asset && typeof asset.downloadUrl === 'string' && isAllowedUpdateUrl(asset.downloadUrl)
+          ? asset.downloadUrl
+          : null;
+      const safeApiUrl =
+        asset && typeof asset.apiUrl === 'string' && isAllowedUpdateUrl(asset.apiUrl)
+          ? asset.apiUrl
+          : null;
+
+      if (window.budgetApp && typeof window.budgetApp.downloadAndInstallUpdate === 'function' && safeDownloadUrl) {
         const res = await window.budgetApp.downloadAndInstallUpdate({
-          downloadUrl: updateInfo.asset.downloadUrl,
-          apiUrl: updateInfo.asset.apiUrl,
-          assetName: updateInfo.asset.name,
+          downloadUrl: safeDownloadUrl,
+          apiUrl: safeApiUrl || undefined,
+          assetName: typeof asset?.name === 'string' ? asset.name : '',
         });
 
         if (res.success) {
@@ -2527,9 +2724,9 @@ function App() {
           setUpdateErrorMessage(res.error || 'Errore durante l\'aggiornamento.');
         }
       } else {
-        if (updateInfo.asset?.downloadUrl) {
-          openUrlSafely(updateInfo.asset.downloadUrl);
-        } else if (updateInfo.htmlUrl) {
+        if (safeDownloadUrl) {
+          openUrlSafely(safeDownloadUrl);
+        } else if (typeof updateInfo.htmlUrl === 'string' && isHttpUrl(updateInfo.htmlUrl)) {
           openUrlSafely(updateInfo.htmlUrl);
         }
         setUpdateStatus('completed');
@@ -2786,9 +2983,9 @@ function App() {
   const [assetChartMode, setAssetChartMode] = useState<'capital' | 'price' | 'return'>('capital');
   const [portfolioChartMode, setPortfolioChartMode] = useState<'total' | 'no-transactions'>('total');
   const [unifiedReportTab, setUnifiedReportTab] = useState<'patrimonio' | 'flussi' | 'allocation'>('patrimonio');
-  const [recurringViewMode, setRecurringViewMode] = useState<'scadenziario' | 'recurring' | 'pac' | 'cashback'>('scadenziario');
+  const [recurringViewMode, setRecurringViewMode] = useState<'scadenziario' | 'recurring' | 'pac' | 'mortgages' | 'cashback'>('scadenziario');
   const [scadenziarioHorizon, setScadenziarioHorizon] = useState<'month' | '30d' | '60d' | '90d'>('month');
-  const [scadenziarioTypeFilter, setScadenziarioTypeFilter] = useState<'all' | 'expense' | 'income' | 'pac'>('all');
+  const [scadenziarioTypeFilter, setScadenziarioTypeFilter] = useState<'all' | 'expense' | 'income' | 'pac' | 'mortgage'>('all');
   const [scadenziarioAccountFilter, setScadenziarioAccountFilter] = useState<string>('all');
   const [scadenziarioSearch, setScadenziarioSearch] = useState<string>('');
   const [showReimbursementSchedule, setShowReimbursementSchedule] = useState<boolean>(false);
@@ -2800,6 +2997,9 @@ function App() {
   );
   const [pianiAccumulo, setPianiAccumulo] = useState<PAC[]>(() =>
     loadStoredValue<PAC[]>(PAC_STORAGE_KEY, [])
+  );
+  const [mortgages, setMortgages] = useState<Mortgage[]>(() =>
+    loadStoredValue<Mortgage[]>(MORTGAGE_STORAGE_KEY, [])
   );
   const [cashbackRules, setCashbackRules] = useState<CashbackRule[]>(() =>
     loadStoredValue<CashbackRule[]>(CASHBACK_RULES_STORAGE_KEY, defaultCashbackRules)
@@ -2839,6 +3039,11 @@ function App() {
     createAssetTransaction: true,
   });
   const [editingPacId, setEditingPacId] = useState<string | null>(null);
+  const [mortgageDraft, setMortgageDraft] = useState(() => createEmptyMortgageDraft());
+  const [editingMortgageId, setEditingMortgageId] = useState<string | null>(null);
+  const [renegotiationForId, setRenegotiationForId] = useState<string | null>(null);
+  const [renegotiationDraft, setRenegotiationDraft] = useState(() => createEmptyRenegotiationDraft());
+  const [expandedMortgageId, setExpandedMortgageId] = useState<string | null>(null);
   const [selectedAssetIdsForChart, setSelectedAssetIdsForChart] = useState<string[]>([]);
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
   const [hoveredSpecificPointIndex, setHoveredSpecificPointIndex] = useState<number | null>(null);
@@ -3019,6 +3224,10 @@ function App() {
       setPianiAccumulo(fileData.pianiAccumulo);
       try { localStorage.setItem(PAC_STORAGE_KEY, JSON.stringify(fileData.pianiAccumulo)); } catch {}
     }
+    if (Array.isArray(fileData.mortgages)) {
+      setMortgages(fileData.mortgages);
+      try { localStorage.setItem(MORTGAGE_STORAGE_KEY, JSON.stringify(fileData.mortgages)); } catch {}
+    }
     if (Array.isArray(fileData.cashbackRules)) {
       setCashbackRules(fileData.cashbackRules);
       try { localStorage.setItem(CASHBACK_RULES_STORAGE_KEY, JSON.stringify(fileData.cashbackRules)); } catch {}
@@ -3039,17 +3248,26 @@ function App() {
       setTheme(fileData.theme);
       try { localStorage.setItem('app-theme', fileData.theme); } catch {}
     }
-    if (typeof fileData.accentColor === 'string') {
-      setAccentColor(fileData.accentColor);
-      try { localStorage.setItem('budget-ledger-accent-color-v1', fileData.accentColor); } catch {}
+    // Solo colori esadecimali: un valore arbitario finirebbe in una
+    // proprietà CSS custom (--accent) con possibile iniezione di stili.
+    if (typeof fileData.accentColor === 'string' && ACCENT_COLOR_REGEX.test(fileData.accentColor.trim())) {
+      const accent = fileData.accentColor.trim();
+      setAccentColor(accent);
+      try { localStorage.setItem('budget-ledger-accent-color-v1', accent); } catch {}
     }
     if (fileData.bgEffect && ['none', 'stars', 'grid', 'waves', 'dots'].includes(fileData.bgEffect)) {
       setBgEffect(fileData.bgEffect);
       try { localStorage.setItem('budget-ledger-bg-effect-v1', fileData.bgEffect); } catch {}
     }
     if (typeof fileData.customLogo === 'string') {
-      setCustomLogo(fileData.customLogo);
-      try { localStorage.setItem('budget_custom_brand_logo', fileData.customLogo); } catch {}
+      // Solo immagini inline (data:): un URL remano sarebbe un beacon di
+      // tracciamento attivato a ogni avvio dell'app (e i payload giganti
+      // gonfierebbero localStorage).
+      const logo = fileData.customLogo;
+      if (DATA_IMAGE_PREFIX_REGEX.test(logo) && logo.length <= MAX_CUSTOM_LOGO_LENGTH) {
+        setCustomLogo(logo);
+        try { localStorage.setItem('budget_custom_brand_logo', logo); } catch {}
+      }
     }
     if (typeof fileData.githubRepo === 'string' && fileData.githubRepo.trim()) {
       setGithubRepo(normalizeGithubRepo(fileData.githubRepo));
@@ -3066,10 +3284,14 @@ function App() {
 
     if (fileData._fileMeta && typeof fileData._fileMeta === 'object' && !window.budgetApp) {
       const meta = fileData._fileMeta;
-      const fileName = meta.fileName || 'user-data.json';
-      const fullPath = meta.macFilePath || meta.filePath || `iCloud Drive / ${fileName}`;
-      const displayLocation = meta.displayLocation || `☁️ iCloud Drive / ${fileName}`;
-      const folderPath = meta.folderPath || 'iCloud Drive';
+      const fileName = sanitizeMetaString(meta.fileName, 'user-data.json');
+      const fullPath = sanitizeMetaString(
+        typeof meta.macFilePath === 'string' ? meta.macFilePath : typeof meta.filePath === 'string' ? meta.filePath : '',
+        `iCloud Drive / ${fileName}`,
+        500
+      );
+      const displayLocation = sanitizeMetaString(meta.displayLocation, `☁️ iCloud Drive / ${fileName}`, 500);
+      const folderPath = sanitizeMetaString(meta.folderPath, 'iCloud Drive', 500);
       const isICloud = meta.isICloud !== undefined ? Boolean(meta.isICloud) : true;
       const updatedInfo: DataFileInfo = {
         filePath: fullPath,
@@ -3117,6 +3339,7 @@ function App() {
       assetTransactions,
       recurringTransactions,
       pianiAccumulo,
+      mortgages,
       cashbackRules,
       accountInitialCapitals,
       subscriptions,
@@ -3152,6 +3375,7 @@ function App() {
     assetTransactions,
     recurringTransactions,
     pianiAccumulo,
+    mortgages,
     cashbackRules,
     accountInitialCapitals,
     subscriptions,
@@ -3345,21 +3569,33 @@ function App() {
       if (!file) return;
       try {
         const text = await file.text();
-        const parsed = JSON.parse(text);
+        const parsed = safeJsonParse<Record<string, any> | null>(text, null);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Il file non contiene JSON valido.');
+        }
 
         const meta = parsed?._fileMeta && typeof parsed._fileMeta === 'object' ? parsed._fileMeta : {};
-        const chosenFileName = file.name || meta.fileName || 'user-data.json';
+        const chosenFileName = file.name || sanitizeMetaString(meta.fileName, 'user-data.json');
+        const metaPath = sanitizeMetaString(
+          typeof meta.macFilePath === 'string' ? meta.macFilePath : typeof meta.filePath === 'string' ? meta.filePath : '',
+          '',
+          500
+        );
         const chosenFullPath =
-          meta.macFilePath ||
-          meta.filePath ||
+          metaPath ||
           (file.webkitRelativePath
             ? `iCloud Drive / ${file.webkitRelativePath}`
             : `iCloud Drive / BudgetingMacApp / ${chosenFileName}`);
-        const chosenFolderPath =
-          meta.folderPath ||
-          (chosenFullPath.includes('/') ? chosenFullPath.slice(0, chosenFullPath.lastIndexOf('/')) : 'iCloud Drive');
-        const chosenDisplayLocation =
-          meta.displayLocation || `☁️ iCloud Drive / BudgetingMacApp / ${chosenFileName}`;
+        const chosenFolderPath = sanitizeMetaString(
+          typeof meta.folderPath === 'string' ? meta.folderPath : '',
+          chosenFullPath.includes('/') ? chosenFullPath.slice(0, chosenFullPath.lastIndexOf('/')) : 'iCloud Drive',
+          500
+        );
+        const chosenDisplayLocation = sanitizeMetaString(
+          typeof meta.displayLocation === 'string' ? meta.displayLocation : '',
+          `☁️ iCloud Drive / BudgetingMacApp / ${chosenFileName}`,
+          500
+        );
         const chosenIsICloud = meta.isICloud !== undefined ? Boolean(meta.isICloud) : true;
 
         const lockedInfo: DataFileInfo = {
@@ -3484,11 +3720,13 @@ function App() {
             try {
               const rawSnap = localStorage.getItem(FULL_DATA_SNAPSHOT_STORAGE_KEY);
               if (rawSnap) {
-                const parsedSnap = JSON.parse(rawSnap);
-                applyFullUserData(
-                  parsedSnap,
-                  idbInfo?.displayLocation || idbInfo?.fileName || 'file principale collegato'
-                );
+                const parsedSnap = safeJsonParse<Record<string, any> | null>(rawSnap, null);
+                if (parsedSnap) {
+                  applyFullUserData(
+                    parsedSnap,
+                    idbInfo?.displayLocation || idbInfo?.fileName || 'file principale collegato'
+                  );
+                }
               }
             } catch {}
           }
@@ -3531,7 +3769,11 @@ function App() {
       if (file.name.toLowerCase().endsWith('.json')) {
         try {
           const text = await file.text();
-          const parsed = JSON.parse(text);
+          const parsed = safeJsonParse<Record<string, any> | null>(text, null);
+          if (!parsed || typeof parsed !== 'object') {
+            console.error('File JSON non valido trascinato sulla finestra.');
+            return;
+          }
           if (
             Array.isArray(parsed?.transactions) ||
             Array.isArray(parsed?.assets) ||
@@ -3617,6 +3859,9 @@ function App() {
     const newAssetTransactionsToPost: AssetTransaction[] = [];
     let recurringUpdated = false;
     let pacUpdated = false;
+    let mortgageUpdated = false;
+    let mortgageInstallmentsCount = 0;
+    let mortgagesPaidOff = 0;
 
     // 1. Process Recurring Transactions
     const updatedRecurringTransactions = recurringTransactions.map((tx) => {
@@ -3701,7 +3946,50 @@ function App() {
       };
     });
 
-    if (newTransactionsToPost.length > 0 || newAssetTransactionsToPost.length > 0) {
+    // 3. Process Mortgages (rate mensili mutuo, con eventuali rinegoziazioni)
+    const updatedMortgages = mortgages.map((m) => {
+      if (!m.isActive) return m;
+
+      const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+      const paidOff = sim.payoffDate !== null && sim.payoffDate <= todayStr;
+
+      let dueRows: typeof sim.rows = [];
+      if (m.autoPost !== false) {
+        const startRef = m.lastPostedDate || m.startDate;
+        dueRows = sim.rows.filter((r) => r.date > startRef && r.date <= todayStr).slice(0, 12);
+
+        dueRows.forEach((row) => {
+          const newTx: Transaction = {
+            id: createTransactionId(),
+            createdAt: Date.now(),
+            date: row.date,
+            merchant: `Rata Mutuo: ${m.name}`,
+            category: m.category,
+            subcategory: m.subcategory,
+            account: m.account,
+            amount: row.payment,
+            kind: 'expense',
+            note: `Rata mutuo ${m.name} del ${formatDisplayDate(row.date)} — quota capitale ${formatEuro(row.principal)}, interessi ${formatEuro(row.interest)}${m.bank ? ` (${m.bank})` : ''}`,
+          };
+          newTransactionsToPost.push(newTx);
+        });
+      }
+
+      mortgageInstallmentsCount += dueRows.length;
+      if (paidOff) mortgagesPaidOff += 1;
+
+      return {
+        ...m,
+        lastPostedDate: dueRows.length > 0 ? dueRows[dueRows.length - 1].date : m.lastPostedDate,
+        isActive: !paidOff,
+      };
+    });
+
+    if (mortgageInstallmentsCount > 0 || mortgagesPaidOff > 0) {
+      mortgageUpdated = true;
+    }
+
+    if (newTransactionsToPost.length > 0 || newAssetTransactionsToPost.length > 0 || mortgageUpdated) {
       if (newTransactionsToPost.length > 0) {
         setTransactions((prev) => [...newTransactionsToPost, ...prev]);
       }
@@ -3714,16 +4002,25 @@ function App() {
       if (pacUpdated) {
         setPianiAccumulo(updatedPianiAccumulo);
       }
-      const recCount = newTransactionsToPost.filter((t) => !t.merchant.startsWith('PAC:')).length;
+      if (mortgageUpdated) {
+        setMortgages(updatedMortgages);
+      }
+      const recCount = newTransactionsToPost.filter((t) => !t.merchant.startsWith('PAC:') && !t.merchant.startsWith('Rata Mutuo:')).length;
       const pacCount = newTransactionsToPost.filter((t) => t.merchant.startsWith('PAC:')).length;
       const msgParts: string[] = [];
       if (recCount > 0) msgParts.push(`${recCount} transazioni ricorrenti`);
       if (pacCount > 0) msgParts.push(`${pacCount} rate PAC`);
-      setStatusMessage(`Sincronizzazione completata: inserite automaticamente ${msgParts.join(' e ')}.`);
+      if (mortgageInstallmentsCount > 0) msgParts.push(`${mortgageInstallmentsCount} rate mutuo`);
+      let syncMsg = 'Sincronizzazione completata';
+      if (msgParts.length > 0) syncMsg += `: inserite automaticamente ${msgParts.join(' e ')}`;
+      if (mortgagesPaidOff > 0) {
+        syncMsg += `${msgParts.length > 0 ? '.' : ':'} ${mortgagesPaidOff} mutuo${mortgagesPaidOff > 1 ? 'i' : ''} estinto${mortgagesPaidOff > 1 ? 'i' : ''}`;
+      }
+      setStatusMessage(`${syncMsg}.`);
       return true;
     }
     return false;
-  }, [recurringTransactions, pianiAccumulo, assets]);
+  }, [recurringTransactions, pianiAccumulo, mortgages, assets]);
 
   // Automatic posting on startup
   useEffect(() => {
@@ -3803,6 +4100,14 @@ function App() {
       setStatusMessage('Impossibile salvare i piani di accumulo.');
     }
   }, [pianiAccumulo]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MORTGAGE_STORAGE_KEY, JSON.stringify(mortgages));
+    } catch {
+      setStatusMessage('Impossibile salvare i mutui.');
+    }
+  }, [mortgages]);
 
   useEffect(() => {
     try {
@@ -3959,6 +4264,27 @@ function App() {
       totalTracked: pendingCount + partialCount + reimbursedCount,
     };
   }, [reimbursementMap]);
+
+  // Items handed to the notification service: expenses still awaiting a refund
+  const reimbursementAlertItems = useMemo<ReimbursementAlertItem[]>(() => {
+    const items: ReimbursementAlertItem[] = [];
+    for (const [expenseId, info] of reimbursementMap) {
+      if (info.status === 'reimbursed') continue;
+      const tx = transactionsById.get(expenseId);
+      if (!tx) continue;
+      items.push({
+        expenseId,
+        merchant: tx.merchant || tx.category,
+        category: tx.category,
+        remainingAmount: info.remainingAmount,
+        totalReimbursed: info.totalReimbursed,
+        dueDate: tx.reimbursementDueDate || undefined,
+        expenseDate: tx.date,
+        status: info.status,
+      });
+    }
+    return items;
+  }, [reimbursementMap, transactionsById]);
 
   const candidateExpensesForReimbursement = useMemo(() => {
     return transactions
@@ -4383,12 +4709,15 @@ function App() {
       horizonEndDate = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59);
     }
 
+    const todayStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const horizonEndStr = `${horizonEndDate.getFullYear()}-${String(horizonEndDate.getMonth() + 1).padStart(2, '0')}-${String(horizonEndDate.getDate()).padStart(2, '0')}`;
+
     type UpcomingMovement = {
       id: string;
       sourceId: string;
       name: string;
       amount: number;
-      kind: 'income' | 'expense' | 'pac';
+      kind: 'income' | 'expense' | 'pac' | 'mortgage';
       dateStr: string;
       categoryOrAsset: string;
       subcategory?: string;
@@ -4533,6 +4862,30 @@ function App() {
       }
     });
 
+    // Calculate Mortgage installments
+    mortgages.forEach((m) => {
+      if (!m.isActive) return;
+      const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+      sim.rows.forEach((row) => {
+        if (row.date < todayStr || row.date > horizonEndStr) return;
+        const diffDays = Math.ceil((new Date(row.date + 'T12:00:00').getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        movements.push({
+          id: `mut-${m.id}-${row.date}`,
+          sourceId: m.id,
+          name: `Rata Mutuo: ${m.name}`,
+          amount: row.payment,
+          kind: 'mortgage',
+          dateStr: row.date,
+          categoryOrAsset: m.bank ? `${m.category} · ${m.bank}` : m.category,
+          subcategory: m.subcategory,
+          account: m.account,
+          frequencyLabel: `Rata mensile (${m.installmentDay}°)`,
+          note: `Capitale ${formatEuro(row.principal)} · Interessi ${formatEuro(row.interest)}`,
+          daysRemaining: diffDays,
+        });
+      });
+    });
+
     // Calculate Cashback & Saveback scheduled investments
     cashbackRules.forEach((cb) => {
       if (!cb.isActive) return;
@@ -4603,7 +4956,7 @@ function App() {
       if (mv.kind === 'income') {
         expectedIncomes += mv.amount;
         runningBalance += mv.amount;
-      } else if (mv.kind === 'expense') {
+      } else if (mv.kind === 'expense' || mv.kind === 'mortgage') {
         expectedExpenses += mv.amount;
         runningBalance -= mv.amount;
       } else {
@@ -4628,7 +4981,7 @@ function App() {
       minProjectedBalance: minBal,
       minProjectedBalanceDate: minBalDate,
     };
-  }, [cashAvailable, recurringTransactions, pianiAccumulo, assets, scadenziarioHorizon]);
+  }, [cashAvailable, recurringTransactions, pianiAccumulo, mortgages, assets, scadenziarioHorizon]);
 
   const {
     currentMonthExpenseTransactions,
@@ -4676,6 +5029,8 @@ function App() {
     const currentDay = today.getDate(); // 1-31
     const lastDateOfMonth = new Date(currentYear, currentMonth + 1, 0);
     const daysInMonth = lastDateOfMonth.getDate();
+    const todayStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const lastDateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
     const expected: { category: string; subcategory: string; amount: number }[] = [];
 
@@ -4725,8 +5080,23 @@ function App() {
       }
     });
 
+    // Rate mutuo in scadenza nel mese corrente
+    mortgages.forEach((m) => {
+      if (!m.isActive) return;
+      const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+      sim.rows.forEach((row) => {
+        if (row.date >= todayStr && row.date <= lastDateStr) {
+          expected.push({
+            category: m.category,
+            subcategory: m.subcategory,
+            amount: row.payment,
+          });
+        }
+      });
+    });
+
     return expected;
-  }, [recurringTransactions]);
+  }, [recurringTransactions, mortgages]);
 
   const totalMonthIncome = useMemo(() => {
     return currentMonthIncomeTotal + projectedRemainingRecurringIncomes;
@@ -4871,12 +5241,6 @@ function App() {
   const totalLiabilitiesVal = useMemo(() => {
     return reportAccountsBalances.reduce((sum, acc) => sum + Math.abs(Math.min(0, acc.liquidity)), 0);
   }, [reportAccountsBalances]);
-
-  const assetsPercent = 100;
-  
-  const liabilitiesPercent = useMemo(() => {
-    return totalAssetsVal > 0 ? Math.min(100, Math.round((totalLiabilitiesVal / totalAssetsVal) * 100)) : 0;
-  }, [totalAssetsVal, totalLiabilitiesVal]);
 
   const assetPortfolioTrend: PortfolioPoint[] = useMemo(() => {
     const activeAssets = selectedAssetIdsForChart.length === 0 ? assets : assets.filter((a) => selectedAssetIdsForChart.includes(a.id));
@@ -5366,6 +5730,11 @@ function App() {
       checkTransactionReminder(latestTx).catch((err) => {
         console.warn('Transaction reminder check warning:', err);
       });
+
+      // Check reimbursement due dates: overdue, due today and due within 7 days
+      checkAndTriggerReimbursementAlerts({ items: reimbursementAlertItems }).catch((err) => {
+        console.warn('Reimbursement alert check warning:', err);
+      });
     }, 2500);
 
     const intervalTimer = setInterval(() => {
@@ -5377,7 +5746,7 @@ function App() {
       clearTimeout(timer);
       clearInterval(intervalTimer);
     };
-  }, [categoryRows, recurringTransactions, transactions]);
+  }, [categoryRows, recurringTransactions, transactions, reimbursementAlertItems]);
 
   const sortedCategoryRows = useMemo(() => {
     const rows = [...categoryRows];
@@ -5491,7 +5860,9 @@ function App() {
   const reportExpenseTotal = reportExpenseTransactions.reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
   const reportIncomeTotal = reportIncomeTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
   const reportNetFlow = reportIncomeTotal - reportExpenseTotal;
-  const recentTransactions = filteredTransactions.slice(0, 6);
+
+  // Trend di spesa a 6 mesi: usato dal grafico MoM in Panoramica e in Report & Patrimonio
+  const dashboardMonthlyTrend = useMonthlyTrend(transactions);
 
   useEffect(() => {
     setSelectedTransactionIds((currentSelected) =>
@@ -5858,6 +6229,324 @@ function App() {
       prev.map((p) => (p.id === pac.id ? { ...p, lastPostedDate: todayStr } : p))
     );
     setStatusMessage(`Rata PAC "${pac.name}" di ${formatEuro(pac.amount)} registrata per la data di oggi!`);
+  };
+
+  // === Mutui & Rinegoziazioni ===
+
+  const handleAddMortgage = (e: FormEvent) => {
+    e.preventDefault();
+    const principalVal = parseFloat(mortgageDraft.principal);
+    const yearsVal = parseInt(mortgageDraft.years, 10);
+    const rateVal = parseFloat(mortgageDraft.annualRatePercent);
+    const dayVal = parseInt(mortgageDraft.installmentDay, 10);
+
+    if (!mortgageDraft.name.trim()) {
+      setStatusMessage('Inserisci un nome per il mutuo.');
+      return;
+    }
+    if (isNaN(principalVal) || principalVal <= 0) {
+      setStatusMessage('Inserisci un capitale del mutuo valido maggiore di zero.');
+      return;
+    }
+    if (isNaN(yearsVal) || yearsVal <= 0) {
+      setStatusMessage('Inserisci una durata valida in anni.');
+      return;
+    }
+    if (isNaN(rateVal) || rateVal < 0) {
+      setStatusMessage('Inserisci un tasso di interesse annuo valido (0 o superiore).');
+      return;
+    }
+
+    if (editingMortgageId) {
+      setMortgages((prev) =>
+        prev.map((m) =>
+          m.id === editingMortgageId
+            ? {
+                ...m,
+                name: mortgageDraft.name.trim(),
+                bank: mortgageDraft.bank.trim(),
+                principal: principalVal,
+                startDate: mortgageDraft.startDate || getTodayIso(),
+                years: yearsVal,
+                annualRatePercent: rateVal,
+                type: mortgageDraft.type,
+                installmentDay: isNaN(dayVal) ? 1 : Math.min(31, Math.max(1, dayVal)),
+                account: mortgageDraft.account,
+                category: mortgageDraft.category || 'Casa',
+                subcategory: mortgageDraft.subcategory.trim() || 'Rata mutuo',
+                extraMonthlyPayment: Math.max(0, parseFloat(mortgageDraft.extraMonthlyPayment) || 0),
+                initialCosts: Math.max(0, parseFloat(mortgageDraft.initialCosts) || 0),
+                notes: mortgageDraft.notes.trim(),
+                autoPost: mortgageDraft.autoPost,
+              }
+            : m
+        )
+      );
+      setEditingMortgageId(null);
+      setMortgageDraft(createEmptyMortgageDraft());
+      setStatusMessage(`Mutuo "${mortgageDraft.name.trim()}" aggiornato con successo!`);
+    } else {
+      const newMortgage: Mortgage = {
+        id: `mortgage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: mortgageDraft.name.trim(),
+        bank: mortgageDraft.bank.trim(),
+        principal: principalVal,
+        startDate: mortgageDraft.startDate || getTodayIso(),
+        years: yearsVal,
+        annualRatePercent: rateVal,
+        type: mortgageDraft.type,
+        installmentDay: isNaN(dayVal) ? 1 : Math.min(31, Math.max(1, dayVal)),
+        account: mortgageDraft.account,
+        category: mortgageDraft.category || 'Casa',
+        subcategory: mortgageDraft.subcategory.trim() || 'Rata mutuo',
+        extraMonthlyPayment: Math.max(0, parseFloat(mortgageDraft.extraMonthlyPayment) || 0),
+        initialCosts: Math.max(0, parseFloat(mortgageDraft.initialCosts) || 0),
+        notes: mortgageDraft.notes.trim(),
+        isActive: true,
+        autoPost: mortgageDraft.autoPost !== false,
+        createdAt: Date.now(),
+        renegotiations: [],
+      };
+
+      setMortgages((prev) => [newMortgage, ...prev]);
+      setMortgageDraft(createEmptyMortgageDraft());
+      setStatusMessage(`Mutuo "${newMortgage.name}" creato con successo! Le rate saranno proiettate nello scadenziario.`);
+    }
+  };
+
+  const handleEditMortgage = (m: Mortgage) => {
+    setEditingMortgageId(m.id);
+    setRenegotiationForId(null);
+    setMortgageDraft({
+      name: m.name,
+      bank: m.bank,
+      principal: String(m.principal),
+      startDate: m.startDate,
+      years: String(m.years),
+      annualRatePercent: String(m.annualRatePercent),
+      type: m.type,
+      installmentDay: String(m.installmentDay),
+      account: m.account,
+      category: m.category,
+      subcategory: m.subcategory,
+      extraMonthlyPayment: m.extraMonthlyPayment ? String(m.extraMonthlyPayment) : '',
+      initialCosts: m.initialCosts ? String(m.initialCosts) : '',
+      notes: m.notes,
+      autoPost: m.autoPost !== false,
+    });
+  };
+
+  const handleCancelEditMortgage = () => {
+    setEditingMortgageId(null);
+    setMortgageDraft(createEmptyMortgageDraft());
+  };
+
+  const handleDeleteMortgage = (id: string) => {
+    const target = mortgages.find((m) => m.id === id);
+    const mortgageName = target ? target.name : 'questo mutuo';
+
+    askConfirmation({
+      title: 'Elimina Mutuo',
+      subtitle: mortgageName,
+      message: `Sei sicuro di voler eliminare il mutuo "${mortgageName}"? Le rate future non verranno più proiettate né inserite automaticamente. Le transazioni già registrate non vengono modificate.`,
+      itemDetails: target ? [
+        { label: 'Nome mutuo', value: target.name },
+        { label: 'Banca', value: target.bank || '—' },
+        { label: 'Capitale iniziale', value: formatEuro(target.principal) },
+        { label: 'Rinegoziazioni', value: String((target.renegotiations || []).length) },
+      ] : undefined,
+      confirmLabel: 'Elimina mutuo',
+      onConfirm: () => {
+        if (editingMortgageId === id) handleCancelEditMortgage();
+        if (renegotiationForId === id) setRenegotiationForId(null);
+        if (expandedMortgageId === id) setExpandedMortgageId(null);
+        setMortgages((prev) => prev.filter((m) => m.id !== id));
+        setStatusMessage(`Mutuo "${mortgageName}" eliminato.`);
+      },
+    });
+  };
+
+  const handleToggleMortgage = (id: string) => {
+    setMortgages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, isActive: !m.isActive } : m))
+    );
+    setStatusMessage('Stato del mutuo modificato (attivo/pausa).');
+  };
+
+  const handleToggleMortgageAutoPost = (id: string) => {
+    setMortgages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, autoPost: m.autoPost === false ? true : false } : m))
+    );
+    setStatusMessage('Inserimento automatico delle rate del mutuo aggiornato.');
+  };
+
+  const handlePostMortgageInstallmentManual = (m: Mortgage) => {
+    const todayStr = getTodayIso();
+    const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+    const nextRow = sim.rows.find((r) => r.date >= todayStr) || sim.rows[sim.rows.length - 1];
+
+    if (!nextRow) {
+      setStatusMessage(`Nessuna rata disponibile per il mutuo "${m.name}".`);
+      return;
+    }
+
+    const newTx: Transaction = {
+      id: createTransactionId(),
+      createdAt: Date.now(),
+      date: todayStr,
+      merchant: `Rata Mutuo: ${m.name}`,
+      category: m.category,
+      subcategory: m.subcategory,
+      account: m.account,
+      amount: nextRow.payment,
+      kind: 'expense',
+      note: `Rata mutuo ${m.name} registrata manualmente — quota capitale ${formatEuro(nextRow.principal)}, interessi ${formatEuro(nextRow.interest)}${m.bank ? ` (${m.bank})` : ''}`,
+    };
+
+    setTransactions((prev) => [newTx, ...prev]);
+
+    const isPaidOff = nextRow.remaining <= 0.005;
+    setMortgages((prev) =>
+      prev.map((mm) =>
+        mm.id === m.id
+          ? {
+              ...mm,
+              lastPostedDate: nextRow.date > (mm.lastPostedDate || '') ? nextRow.date : mm.lastPostedDate,
+              isActive: isPaidOff ? false : mm.isActive,
+            }
+          : mm
+      )
+    );
+
+    setStatusMessage(
+      `Rata di ${formatEuro(nextRow.payment)} registrata per "${m.name}"${isPaidOff ? ' — mutuo estinto!' : '.'}`
+    );
+  };
+
+  const handleStartRenegotiation = (m: Mortgage) => {
+    const todayStr = getTodayIso();
+    const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+    const futureRows = sim.rows.filter((r) => r.date >= todayStr);
+    const remainingYearsEstimate = Math.max(1, Math.ceil(futureRows.length / 12));
+
+    setRenegotiationDraft({
+      date: todayStr,
+      newAnnualRatePercent: String(sim.currentRatePercent),
+      newRemainingYears: String(remainingYearsEstimate),
+      costs: '',
+      recordCosts: true,
+      notes: '',
+    });
+    setRenegotiationForId(m.id);
+    setEditingMortgageId(null);
+    setExpandedMortgageId(m.id);
+    setStatusMessage(`Rinegoziazione del mutuo "${m.name}": indica i nuovi termini nel modulo.`);
+  };
+
+  const handleApplyRenegotiation = (e: FormEvent) => {
+    e.preventDefault();
+    const target = mortgages.find((m) => m.id === renegotiationForId);
+    if (!target) {
+      setRenegotiationForId(null);
+      return;
+    }
+
+    const rateVal = parseFloat(renegotiationDraft.newAnnualRatePercent);
+    const yearsVal = parseInt(renegotiationDraft.newRemainingYears, 10);
+
+    if (isNaN(rateVal) || rateVal < 0) {
+      setStatusMessage('Inserisci un nuovo tasso annuo valido (0 o superiore).');
+      return;
+    }
+    if (isNaN(yearsVal) || yearsVal <= 0) {
+      setStatusMessage('Inserisci una nuova durata residua valida (almeno 1 anno).');
+      return;
+    }
+    if (!renegotiationDraft.date || renegotiationDraft.date < target.startDate) {
+      setStatusMessage('La data della rinegoziazione non può precedere l\'erogazione del mutuo.');
+      return;
+    }
+
+    const costsVal = Math.max(0, parseFloat(renegotiationDraft.costs) || 0);
+
+    const newRen: MortgageRenegotiation = {
+      id: `reneg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      date: renegotiationDraft.date,
+      newAnnualRatePercent: rateVal,
+      newRemainingYears: yearsVal,
+      costs: costsVal,
+      notes: renegotiationDraft.notes.trim(),
+      createdAt: Date.now(),
+    };
+
+    setMortgages((prev) =>
+      prev.map((m) =>
+        m.id === target.id
+          ? {
+              ...m,
+              renegotiations: [...(m.renegotiations || []), newRen].sort(
+                (a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt
+              ),
+            }
+          : m
+      )
+    );
+
+    if (costsVal > 0 && renegotiationDraft.recordCosts) {
+      const newTx: Transaction = {
+        id: createTransactionId(),
+        createdAt: Date.now(),
+        date: newRen.date,
+        merchant: `Rinegoziazione Mutuo: ${target.name}`,
+        category: target.category,
+        subcategory: 'Spese rinegoziazione',
+        account: target.account,
+        amount: costsVal,
+        kind: 'expense',
+        note: `Spese rinegoziazione mutuo ${target.name}${newRen.notes ? ` — ${newRen.notes}` : ''}`,
+      };
+      setTransactions((prev) => [newTx, ...prev]);
+    }
+
+    setRenegotiationForId(null);
+    setRenegotiationDraft(createEmptyRenegotiationDraft());
+    setExpandedMortgageId(target.id);
+    setStatusMessage(
+      `Rinegoziazione applicata a "${target.name}". Nuova rata ricalcolata sul capitale residuo.${costsVal > 0 && renegotiationDraft.recordCosts ? ' Spese registrate come transazione.' : ''}`
+    );
+  };
+
+  const handleCancelRenegotiation = () => {
+    setRenegotiationForId(null);
+    setRenegotiationDraft(createEmptyRenegotiationDraft());
+  };
+
+  const handleDeleteRenegotiation = (mortgageId: string, renegId: string) => {
+    const target = mortgages.find((m) => m.id === mortgageId);
+    const reneg = target?.renegotiations?.find((r) => r.id === renegId);
+    if (!target || !reneg) return;
+
+    askConfirmation({
+      title: 'Elimina Rinegoziazione',
+      subtitle: target.name,
+      message: `Rimuovere la rinegoziazione del ${formatDisplayDate(reneg.date)} dal mutuo "${target.name}"? Il piano di ammortamento tornerà a usare le condizioni precedenti da quella data.`,
+      itemDetails: [
+        { label: 'Data', value: formatDisplayDate(reneg.date) },
+        { label: 'Nuovo tasso', value: `${reneg.newAnnualRatePercent.toFixed(2)}%` },
+        { label: 'Nuova durata residua', value: `${reneg.newRemainingYears} anni` },
+      ],
+      confirmLabel: 'Elimina rinegoziazione',
+      onConfirm: () => {
+        setMortgages((prev) =>
+          prev.map((m) =>
+            m.id === mortgageId
+              ? { ...m, renegotiations: (m.renegotiations || []).filter((r) => r.id !== renegId) }
+              : m
+          )
+        );
+        setStatusMessage('Rinegoziazione rimossa e piano ricalcolato.');
+      },
+    });
   };
 
   const handleAddCashbackRule = (ruleData: Omit<CashbackRule, 'id' | 'createdAt'>, newAsset?: NewAssetPayload) => {
@@ -6332,6 +7021,21 @@ function App() {
             : tx
         )
       );
+
+      // Confirm the refund arrival with a system notification (partial or full settlement)
+      const linkedExpense = transactions.find((t) => t.id === nextTransaction.reimbursesTransactionId);
+      if (linkedExpense) {
+        const refundedTotal =
+          transactions
+            .filter((t) => t.kind === 'income' && t.reimbursesTransactionId === linkedExpense.id)
+            .reduce((sum, t) => sum + Math.abs(t.amount), 0) + Math.abs(nextTransaction.amount);
+        const remainingAmount = Math.max(0, Math.abs(linkedExpense.amount) - refundedTotal);
+        sendReimbursementReceivedNotification({
+          expenseMerchant: linkedExpense.merchant || linkedExpense.category,
+          amount: Math.abs(nextTransaction.amount),
+          remainingAmount,
+        }).catch(() => {});
+      }
     }
     setStatusMessage(
       editorMode === 'edit'
@@ -8875,15 +9579,11 @@ function App() {
   const renderDashboard = () => (
     <>
       <section className="hero">
-        <div>
-          <p className="hero-label">Stato budget famigliare</p>
-          <h3>Un quadro completo per vedere flusso di cassa, pressione sulle categorie e progresso del risparmio.</h3>
-          <p className="hero-copy">
-            
-          </p>
-        </div>
-
         <div className="hero-rail">
+          <div className="hero-rail-item">
+            <span className="rail-label">Entrate del mese</span>
+            <strong>{formatEuro(currentMonthIncomeTotal)}</strong>
+          </div>
           <div className="hero-rail-item">
             <span className="rail-label">Spese del mese</span>
             <strong>{formatEuro(currentMonthExpenseTotal)}</strong>
@@ -8892,10 +9592,6 @@ function App() {
                 su {formatEuro(budgetLimit)} di budget
               </small>
             )}
-          </div>
-          <div className="hero-rail-item">
-            <span className="rail-label">Entrate del mese</span>
-            <strong>{formatEuro(currentMonthIncomeTotal)}</strong>
           </div>
         </div>
       </section>
@@ -8906,100 +9602,28 @@ function App() {
         ))}
       </section>
 
-      <section className="content-grid">
-        <article className="panel large-panel">
-          <div className="panel-header">
+      <section className="content-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <article className="panel large-panel" style={{ margin: 0 }}>
+          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <div>
-              <p className="panel-title">Budget per categoria</p>
-              <h4>Allocazione dettagliata e margine residuo</h4>
-            </div>
-            <button className="ghost-button" type="button" onClick={() => setActiveSection('budget')}>
-              Vedi tutte le categorie
-            </button>
-          </div>
-
-          <div className="category-list">
-            {categoryRows.map((category) => (
-              <div className="category-row" key={category.name} style={{ borderLeft: `4px solid ${category.color || 'var(--accent)'}` }}>
-                <div className="category-meta">
-                  <div className="category-dot" style={{ background: category.color }} />
-                  <div>
-                    <strong>{category.name}</strong>
-                    <p>{category.note}</p>
-                  </div>
-                </div>
-
-                <div className="category-stats">
-                  <span>
-                    {formatEuro(category.spent)} / {formatEuro(category.limit)}
-                  </span>
-                  <div className="progress slim">
-                    <span style={{ width: `${category.ratio}%`, background: category.color }} />
-                  </div>
-                  <small>{formatEuro(category.remaining)} residui</small>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.2rem' }}>📉</span>
+                <p className="panel-title" style={{ margin: 0 }}>Trend di Spesa 6 Mensilità &amp; Variazione Mese su Mese</p>
               </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <p className="panel-title">Andamento mensile {currentYear}</p>
-              <h4>Entrate vs Uscite</h4>
-              <div style={{ display: 'flex', gap: '12px', fontSize: '0.75rem', marginTop: '4px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, var(--success), var(--success-strong))' }} />
-                  <span style={{ color: 'var(--muted)' }}>Entrate</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '2px', background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))' }} />
-                  <span style={{ color: 'var(--muted)' }}>Uscite</span>
-                </div>
-              </div>
+              <h4>Andamento Spesa Totale negli ultimi 6 Mesi</h4>
             </div>
             <button className="ghost-button" type="button" onClick={() => setActiveSection('report')}>
-              Apri report
+              Vedi il report completo
             </button>
           </div>
 
-          <div className="bar-chart" aria-label="Monthly comparison dashboard chart" style={{ gridTemplateColumns: `repeat(${currentYearMonthlyData.length}, minmax(0, 1fr))`, minHeight: '260px' }}>
-            {(() => {
-              const maxVal = Math.max(...currentYearMonthlyData.map((p) => Math.max(p.income, p.expenses)), 1);
-              return currentYearMonthlyData.map((point) => (
-                <div className="bar-column" key={point.label} style={{ gap: '6px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '0.7rem', lineHeight: 1.1, minHeight: '32px', justifyContent: 'end' }}>
-                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>{formatEuroCompact(point.income)}</span>
-                    <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatEuroCompact(point.expenses)}</span>
-                  </div>
-                  <div className="bar-track" style={{ display: 'flex', gap: '4px', alignItems: 'flex-end', justifyContent: 'center', padding: '4px' }}>
-                    <span
-                      title={`Entrate: ${formatEuro(point.income)}`}
-                      style={{
-                        height: `${Math.max((point.income / maxVal) * 100, 4)}%`,
-                        background: 'linear-gradient(180deg, var(--success), var(--success-strong))',
-                        boxShadow: '0 8px 16px var(--success-border)',
-                        borderRadius: '6px',
-                        width: '100%'
-                      }}
-                    />
-                    <span
-                      title={`Uscite: ${formatEuro(point.expenses)}`}
-                      style={{
-                        height: `${Math.max((point.expenses / maxVal) * 100, 4)}%`,
-                        background: 'linear-gradient(180deg, var(--danger), var(--danger-strong))',
-                        boxShadow: '0 8px 16px var(--danger-border)',
-                        borderRadius: '6px',
-                        width: '100%'
-                      }}
-                    />
-                  </div>
-                  <span className="bar-label" style={{ fontWeight: 500, color: 'var(--text)' }}>{point.label}</span>
-                </div>
-              ));
-            })()}
-          </div>
+          <MonthlyTrendChart
+            months={dashboardMonthlyTrend.months}
+            maxVal={dashboardMonthlyTrend.maxVal}
+            avgMonthly={dashboardMonthlyTrend.avgMonthly}
+            peakTotal={dashboardMonthlyTrend.peakTotal}
+            formatEuro={formatEuro}
+          />
         </article>
       </section>
 
@@ -9289,73 +9913,6 @@ function App() {
           )}
         </article>
       </section>
-
-      <section className="content-grid secondary-grid">
-        <article className="panel large-panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-title">Attività recente</p>
-              <h4>Ultime transazioni e movimenti del conto</h4>
-            </div>
-          </div>
-
-          <div className="transaction-table">
-            {recentTransactions.map((transaction) => (
-              <div className="transaction-row" key={transaction.id}>
-                <div>
-                  <strong>{transaction.merchant}</strong>
-                  <p>
-                    {formatCategoryPath(transaction.category, transaction.subcategory)} · {transaction.account}
-                  </p>
-                  <small>{formatDisplayDate(transaction.date)} · {transaction.note || 'Nessuna nota'}</small>
-                </div>
-                <span>{formatKindLabel(transaction.kind, transaction.category, transaction.subcategory)}</span>
-                <strong
-                  className={
-                    isTransferCategory(transaction.category, transaction.subcategory)
-                      ? 'amount'
-                      : transaction.kind === 'income'
-                      ? 'amount positive'
-                      : 'amount negative'
-                  }
-                  style={isTransferCategory(transaction.category, transaction.subcategory) ? { color: 'var(--info)' } : undefined}
-                >
-                  {isTransferCategory(transaction.category, transaction.subcategory)
-                    ? `⇆ ${formatEuro(Math.abs(transaction.amount))}`
-                    : formatSignedEuro(transaction.amount)}
-                </strong>
-                <button className="ghost-button" type="button" onClick={() => openEditTransaction(transaction)}>
-                  Modifica
-                </button>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel networth-panel">
-          <div className="panel-header">
-            <div>
-              <p className="panel-title">Patrimonio netto</p>
-              <h4>Attività, passività e autonomia finanziaria</h4>
-            </div>
-          </div>
-
-          <div className="networth-value">{formatEuro(currentNetWorth)}</div>
-          <p className="networth-copy">
-            Attività: {formatEuro(totalAssetsVal)} · Passività: {formatEuro(totalLiabilitiesVal)}
-          </p>
-
-          <div className="stacked-bars">
-            <div className="stacked-bar assets" style={{ width: `${assetsPercent}%` }} />
-            <div className="stacked-bar liabilities" style={{ width: `${liabilitiesPercent}%` }} />
-          </div>
-
-          <div className="bottom-note" style={{ display: 'flex' }}>
-            <span>Autonomia di emergenza</span>
-            <strong>{emergencyAutonomyMonths} {emergencyAutonomyMonths === 1 ? 'mese' : 'mesi'}</strong>
-          </div>
-        </article>
-      </section>
     </>
   );
 
@@ -9540,7 +10097,7 @@ function App() {
                     </span>
                   </div>
                   <div style={{ fontSize: '0.74rem', color: 'var(--muted)', marginTop: '2px' }}>
-                    Monitora lo stato delle spese da rimborsare e le entrate collegate.
+                    Monitora lo stato delle spese da rimborsare e le entrate collegate. Scadenze imminenti, ritardi e incassi vengono segnalati anche con una notifica di sistema.
                   </div>
                 </div>
               </div>
@@ -10204,21 +10761,23 @@ function App() {
 
                 <label className="form-field">
                   <span>Nuova Categoria</span>
-                  <input
-                    list="category-options"
+                  <AutocompleteInput
                     value={bulkDraft.category}
-                    onChange={(event) => setBulkDraft((current) => ({ ...current, category: event.target.value }))}
+                    onChange={(value) => setBulkDraft((current) => ({ ...current, category: value }))}
+                    options={categoryOptions}
                     placeholder="Mantieni originale..."
+                    ariaLabel="Nuova categoria"
                   />
                 </label>
 
                 <label className="form-field">
                   <span>Nuova Sottocategoria</span>
-                  <input
-                    list="subcategory-options"
+                  <AutocompleteInput
                     value={bulkDraft.subcategory}
-                    onChange={(event) => setBulkDraft((current) => ({ ...current, subcategory: event.target.value }))}
+                    onChange={(value) => setBulkDraft((current) => ({ ...current, subcategory: value }))}
+                    options={subcategoryOptions}
                     placeholder="Mantieni originale..."
+                    ariaLabel="Nuova sottocategoria"
                   />
                 </label>
 
@@ -10488,6 +11047,7 @@ function App() {
           editingTransaction={editingTransaction}
           categoryOptions={categoryOptions}
           subcategoryOptions={subcategoryOptions}
+          budgetCategories={budgetCategories}
           accountOptions={accountOptions}
           candidateExpenses={candidateExpensesForReimbursement}
           allTransactions={transactions}
@@ -10638,7 +11198,7 @@ function App() {
         </div>
       </article>
 
-      <article className="panel">
+      <article className="panel editor-panel">
         <div className="panel-header">
           <div>
             <p className="panel-title">Editor budget</p>
@@ -11470,10 +12030,11 @@ function App() {
     const expensesCount = upcomingMovementsList.filter((m) => m.kind === 'expense').length;
     const incomesCount = upcomingMovementsList.filter((m) => m.kind === 'income').length;
     const pacsCount = upcomingMovementsList.filter((m) => m.kind === 'pac').length;
+    const mortgagesCount = upcomingMovementsList.filter((m) => m.kind === 'mortgage').length;
 
     const dueIn7DaysMovements = upcomingMovementsList.filter((m) => m.daysRemaining >= 0 && m.daysRemaining <= 7);
     const dueIn7DaysExpenses = dueIn7DaysMovements
-      .filter((m) => m.kind === 'expense' || m.kind === 'pac')
+      .filter((m) => m.kind === 'expense' || m.kind === 'pac' || m.kind === 'mortgage')
       .reduce((s, m) => s + m.amount, 0);
     const dueIn7DaysIncomes = dueIn7DaysMovements
       .filter((m) => m.kind === 'income')
@@ -11487,6 +12048,74 @@ function App() {
         : scadenziarioHorizon === '90d'
         ? 'nei prossimi 90 giorni'
         : 'entro fine mese corrente';
+
+    // Riepilogo mutui per la scheda dedicata
+    const mortgagesTodayIso = getTodayIso();
+    const activeMortgages = mortgages.filter((m) => m.isActive);
+    let totalMonthlyInstallments = 0;
+    let totalRemainingPrincipal = 0;
+    let totalInterestAllMortgages = 0;
+    let nextInstallment: { date: string; amount: number; name: string } | null = null;
+    for (const m of activeMortgages) {
+      const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+      totalMonthlyInstallments += sim.currentMonthlyPayment;
+      totalRemainingPrincipal += sim.remainingAt(mortgagesTodayIso);
+      totalInterestAllMortgages += sim.totalInterest;
+      const nx = sim.rows.find((r) => r.date >= mortgagesTodayIso);
+      if (nx && (!nextInstallment || nx.date < nextInstallment.date)) {
+        nextInstallment = { date: nx.date, amount: nx.payment, name: m.name };
+      }
+    }
+
+    // Anteprima live del mutuo in fase di inserimento/modifica
+    const draftPrincipal = parseFloat(mortgageDraft.principal);
+    const draftYears = parseInt(mortgageDraft.years, 10);
+    const draftRate = parseFloat(mortgageDraft.annualRatePercent);
+    const draftSim =
+      !isNaN(draftPrincipal) && draftPrincipal > 0 && !isNaN(draftYears) && draftYears > 0 && !isNaN(draftRate) && draftRate >= 0
+        ? simulateMortgageTimeline({
+            principal: draftPrincipal,
+            years: draftYears,
+            annualRatePercent: draftRate,
+            type: mortgageDraft.type,
+            startDate: mortgageDraft.startDate || getTodayIso(),
+            installmentDay: parseInt(mortgageDraft.installmentDay, 10) || 1,
+            extraMonthlyPayment: parseFloat(mortgageDraft.extraMonthlyPayment) || 0,
+            renegotiations: editingMortgageId
+              ? (mortgages.find((m) => m.id === editingMortgageId)?.renegotiations || []).map((r) => ({
+                  date: r.date,
+                  annualRatePercent: r.newAnnualRatePercent,
+                  remainingYears: r.newRemainingYears,
+                }))
+              : [],
+          })
+        : null;
+
+    // Anteprima rinegoziazione (mutuo selezionato + nuove condizioni in bozza)
+    const renegTarget = renegotiationForId ? mortgages.find((m) => m.id === renegotiationForId) || null : null;
+    const renegTargetCurrentSim = renegTarget ? simulateMortgageTimeline(mortgageToTimelineInput(renegTarget)) : null;
+    const renegRate = parseFloat(renegotiationDraft.newAnnualRatePercent);
+    const renegYears = parseInt(renegotiationDraft.newRemainingYears, 10);
+    const renegSim =
+      renegTarget && renegotiationDraft.date && !isNaN(renegRate) && renegRate >= 0 && !isNaN(renegYears) && renegYears > 0
+        ? simulateMortgageTimeline({
+            principal: renegTarget.principal,
+            years: renegTarget.years,
+            annualRatePercent: renegTarget.annualRatePercent,
+            type: renegTarget.type,
+            startDate: renegTarget.startDate,
+            installmentDay: renegTarget.installmentDay,
+            extraMonthlyPayment: renegTarget.extraMonthlyPayment,
+            renegotiations: [
+              ...(renegTarget.renegotiations || []).map((r) => ({
+                date: r.date,
+                annualRatePercent: r.newAnnualRatePercent,
+                remainingYears: r.newRemainingYears,
+              })),
+              { date: renegotiationDraft.date, annualRatePercent: renegRate, remainingYears: renegYears },
+            ],
+          })
+        : null;
 
     return (
       <div className="recurring-and-pac-view" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -11541,6 +12170,23 @@ function App() {
             }}
           >
             📈 Piani di Accumulo (PAC) ({pianiAccumulo.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRecurringViewMode('mortgages')}
+            style={{
+              padding: '8px 18px',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              fontWeight: 650,
+              cursor: 'pointer',
+              border: 'none',
+              backgroundColor: recurringViewMode === 'mortgages' ? 'var(--accent)' : 'transparent',
+              color: recurringViewMode === 'mortgages' ? 'var(--pill-primary-text)' : 'var(--muted)',
+            }}
+          >
+            🏠 Mutui & Rinegoziazioni ({mortgages.length})
           </button>
 
           <button
@@ -11665,7 +12311,7 @@ function App() {
               <div className="metric-card" style={{ borderLeftColor: 'var(--danger)' }}>
                 <p className="metric-label">Uscite in Scadenza</p>
                 <h3>{formatEuro(projectedRemainingRecurringExpenses)}</h3>
-                <span className="metric-delta">{expensesCount} addebiti attesi</span>
+                <span className="metric-delta">{expensesCount + mortgagesCount} addebiti attesi</span>
               </div>
               <div className="metric-card">
                 <p className="metric-label">Entrate Attese</p>
@@ -11824,6 +12470,23 @@ function App() {
                 >
                   PAC ({pacsCount})
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setScadenziarioTypeFilter('mortgage')}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    border: '1px solid',
+                    borderColor: scadenziarioTypeFilter === 'mortgage' ? 'var(--warning)' : 'var(--border)',
+                    background: scadenziarioTypeFilter === 'mortgage' ? 'var(--warning-soft)' : 'transparent',
+                    color: scadenziarioTypeFilter === 'mortgage' ? 'var(--warning)' : 'var(--muted)',
+                  }}
+                >
+                  🏠 Mutui ({mortgagesCount})
+                </button>
               </div>
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -11960,7 +12623,7 @@ function App() {
                             </td>
                             <td>
                               <span
-                                className={`badge ${mv.kind === 'income' ? 'badge-income' : mv.kind === 'expense' ? 'badge-expense' : 'badge-pac'}`}
+                                className={`badge ${mv.kind === 'income' ? 'badge-income' : mv.kind === 'expense' ? 'badge-expense' : mv.kind === 'mortgage' ? 'badge-expense' : 'badge-pac'}`}
                                 style={{
                                   padding: '2px 8px',
                                   borderRadius: '12px',
@@ -11971,11 +12634,13 @@ function App() {
                                       ? 'var(--success-soft)'
                                       : mv.kind === 'expense'
                                       ? 'var(--danger-soft)'
+                                      : mv.kind === 'mortgage'
+                                      ? 'var(--warning-soft)'
                                       : 'var(--info-soft)',
-                                  color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : 'var(--info)',
+                                  color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : mv.kind === 'mortgage' ? 'var(--warning)' : 'var(--info)',
                                 }}
                               >
-                                {mv.kind === 'income' ? 'Entrata' : mv.kind === 'expense' ? 'Uscita' : 'PAC'}
+                                {mv.kind === 'income' ? 'Entrata' : mv.kind === 'expense' ? 'Uscita' : mv.kind === 'mortgage' ? 'Mutuo' : 'PAC'}
                               </span>
                             </td>
                             <td>
@@ -11991,7 +12656,7 @@ function App() {
                                 textAlign: 'right',
                                 fontWeight: 700,
                                 fontFamily: 'var(--font-mono)',
-                                color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : 'var(--info)',
+                                color: mv.kind === 'income' ? 'var(--success)' : mv.kind === 'expense' ? 'var(--danger)' : mv.kind === 'mortgage' ? 'var(--warning)' : 'var(--info)',
                               }}
                             >
                               {mv.kind === 'income' ? '+' : '-'}{formatEuro(mv.amount)}
@@ -12017,7 +12682,7 @@ function App() {
 
               <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: 'var(--overlay-subtle)', borderRadius: '0 0 12px 12px' }}>
                 <span style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
-                  💡 Questa sezione visualizza le scadenze e proietta l'evoluzione del saldo liquido. Per configurare nuove uscite ricorrenti o PAC, passa alle schede "Movimenti Ricorrenti" e "Piani di Accumulo (PAC)".
+                  💡 Questa sezione visualizza le scadenze e proietta l'evoluzione del saldo liquido. Per configurare nuove uscite ricorrenti, PAC o mutui, passa alle schede "Movimenti Ricorrenti", "Piani di Accumulo (PAC)" e "Mutui & Rinegoziazioni".
                 </span>
               </div>
             </article>
@@ -12622,7 +13287,718 @@ function App() {
           </div>
         )}
 
-        {/* Tab 4: Cashback & Saveback Manager */}
+        {/* Tab 4: Mutui & Rinegoziazioni */}
+        {recurringViewMode === 'mortgages' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Riepilogo mutui attivi */}
+            <section className="metric-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+              <div className="metric-card" style={{ borderLeftColor: 'var(--warning)' }}>
+                <p className="metric-label">Rate Mensili Complessive</p>
+                <h3>{formatEuro(totalMonthlyInstallments)}</h3>
+                <span className="metric-delta">{activeMortgages.length === 1 ? '1 mutuo attivo' : `${activeMortgages.length} mutui attivi`}</span>
+              </div>
+              <div className="metric-card" style={{ borderLeftColor: 'var(--danger)' }}>
+                <p className="metric-label">Capitale Residuo Totale</p>
+                <h3>{formatEuro(totalRemainingPrincipal)}</h3>
+                <span className="metric-delta">a oggi sui mutui attivi</span>
+              </div>
+              <div className="metric-card" style={{ borderLeftColor: 'var(--info)' }}>
+                <p className="metric-label">Interessi Totali Stimati</p>
+                <h3>{formatEuro(totalInterestAllMortgages)}</h3>
+                <span className="metric-delta">su tutta la durata dei piani</span>
+              </div>
+              <div className="metric-card" style={{ borderLeftColor: 'var(--accent)' }}>
+                <p className="metric-label">Prossima Rata in Scadenza</p>
+                <h3>{nextInstallment ? formatEuro(nextInstallment.amount) : '—'}</h3>
+                <span className="metric-delta">{nextInstallment ? `${formatDisplayDate(nextInstallment.date)} · ${nextInstallment.name}` : 'Nessuna scadenza imminente'}</span>
+              </div>
+            </section>
+
+            <div className="responsive-split-grid">
+              {/* Form: inserimento / modifica mutuo */}
+              <article className="panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="panel-title">{editingMortgageId ? 'Modifica Mutuo' : 'Aggiungi Mutuo'}</p>
+                    <h4>{editingMortgageId ? 'Aggiorna i dati del mutuo e del piano' : 'Inserisci un nuovo mutuo con il suo piano di ammortamento'}</h4>
+                  </div>
+                </div>
+
+                <form className="transaction-form" onSubmit={handleAddMortgage}>
+                  <div className="form-grid">
+                    <label className="form-field" style={{ gridColumn: 'span 2' }}>
+                      <span>Nome Mutuo</span>
+                      <input
+                        type="text"
+                        value={mortgageDraft.name}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Es. Mutuo Casa Milano"
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Banca / Istituto di Credito</span>
+                      <input
+                        type="text"
+                        value={mortgageDraft.bank}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, bank: e.target.value }))}
+                        placeholder="Es. Intesa Sanpaolo"
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Capitale Erogato (€)</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={mortgageDraft.principal}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, principal: e.target.value }))}
+                        placeholder="0.00"
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Data Erogazione / Inizio Piano</span>
+                      <input
+                        type="date"
+                        value={mortgageDraft.startDate}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, startDate: e.target.value }))}
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Giorno della Rata</span>
+                      <select
+                        value={mortgageDraft.installmentDay}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, installmentDay: e.target.value }))}
+                      >
+                        {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                          <option key={day} value={day}>{day}° del mese</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Durata (anni)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={mortgageDraft.years}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, years: e.target.value }))}
+                        placeholder="25"
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Tasso Annuo TAN (%)</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={mortgageDraft.annualRatePercent}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, annualRatePercent: e.target.value }))}
+                        placeholder="3.50"
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Tipo di Ammortamento</span>
+                      <select
+                        value={mortgageDraft.type}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, type: e.target.value as AmortizationType }))}
+                      >
+                        <option value="french">Francese (rata costante)</option>
+                        <option value="italian">Italiano (quota capitale costante)</option>
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Conto di Addebito</span>
+                      <select
+                        value={mortgageDraft.account}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, account: e.target.value }))}
+                      >
+                        <option value="">-- Conto predefinito --</option>
+                        {accountOptions.map((acc) => (
+                          <option key={acc} value={acc}>{acc}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Categoria</span>
+                      <select
+                        value={mortgageDraft.category}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, category: e.target.value }))}
+                      >
+                        {allCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Sottocategoria</span>
+                      <input
+                        type="text"
+                        value={mortgageDraft.subcategory}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, subcategory: e.target.value }))}
+                        placeholder="Es. Rata mutuo"
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Versamento Extra Mensile (€)</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={mortgageDraft.extraMonthlyPayment}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, extraMonthlyPayment: e.target.value }))}
+                        placeholder="0.00 (opzionale)"
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Spese Iniziali (€)</span>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={mortgageDraft.initialCosts}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, initialCosts: e.target.value }))}
+                        placeholder="0.00 (opzionale)"
+                      />
+                    </label>
+                    <label className="form-field" style={{ gridColumn: 'span 2' }}>
+                      <span>Note</span>
+                      <textarea
+                        rows={2}
+                        value={mortgageDraft.notes}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, notes: e.target.value }))}
+                        placeholder="Es. Tasso fisso, spese di istruttoria, clausole particolari..."
+                      />
+                    </label>
+                  </div>
+
+                  {/* Inserimento automatico delle rate */}
+                  <div style={{
+                    marginTop: '1rem',
+                    padding: '0.85rem',
+                    borderRadius: '10px',
+                    background: 'var(--info-soft)',
+                    border: '1px solid var(--info-border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem'
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={mortgageDraft.autoPost}
+                        onChange={(e) => setMortgageDraft(prev => ({ ...prev, autoPost: e.target.checked }))}
+                        style={{ accentColor: 'var(--accent)' }}
+                      />
+                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+                        Inserimento automatico delle rate alla scadenza
+                      </span>
+                    </label>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--muted)', paddingLeft: '24px' }}>
+                      All'avvio dell'app le rate scadute vengono registrate automaticamente con quota capitale e interessi.
+                    </p>
+                  </div>
+
+                  {/* Anteprima live del piano */}
+                  {draftSim && (
+                    <div style={{
+                      marginTop: '1rem',
+                      padding: '0.85rem',
+                      borderRadius: '10px',
+                      background: 'var(--panel-card-bg)',
+                      border: '1px solid var(--border)'
+                    }}>
+                      <p style={{ margin: '0 0 0.6rem 0', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+                        📊 Anteprima Piano di Ammortamento
+                      </p>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.6rem' }}>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Rata mensile</span>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--warning)' }}>{formatEuro(draftSim.currentMonthlyPayment)}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Capitale residuo</span>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>{formatEuro(draftSim.remainingAt(mortgagesTodayIso))}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Interessi totali</span>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>{formatEuro(draftSim.totalInterest)}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Estinzione</span>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>{draftSim.payoffDate ? formatDisplayDate(draftSim.payoffDate) : '—'}</div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Durata effettiva</span>
+                          <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)' }}>
+                            {draftSim.rows.length > 0 ? `${Math.floor(draftSim.rows.length / 12)} anni ${draftSim.rows.length % 12} mesi` : '—'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-actions" style={{ marginTop: '1rem' }}>
+                    <button className="pill pill-primary" type="submit">
+                      {editingMortgageId ? 'Aggiorna Mutuo' : 'Aggiungi Mutuo'}
+                    </button>
+                    {editingMortgageId && (
+                      <button className="pill" type="button" onClick={handleCancelEditMortgage}>
+                        Annulla
+                      </button>
+                    )}
+                  </div>
+                </form>
+              </article>
+
+              {/* Lista mutui con rinegoziazioni */}
+              <article className="panel">
+                <div className="panel-header">
+                  <div>
+                    <p className="panel-title">Lista Mutui &amp; Rinegoziazioni</p>
+                    <h4>{mortgages.length === 1 ? '1 mutuo' : `${mortgages.length} mutui`} ({activeMortgages.length === 1 ? '1 attivo' : `${activeMortgages.length} attivi`}) · {mortgages.reduce((acc, m) => acc + (m.renegotiations?.length || 0), 0)} rinegoziazioni</h4>
+                  </div>
+                </div>
+
+                {mortgages.length === 0 ? (
+                  <p style={{ padding: '1rem', color: 'var(--muted)', fontSize: '0.9rem', textAlign: 'center' }}>
+                    Nessun mutuo inserito. Compila il modulo a sinistra per aggiungere il tuo primo mutuo: le rate saranno proiettate nello scadenziario e registrabili automaticamente.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxHeight: 'clamp(360px, calc(100vh - 320px), 760px)', overflowY: 'auto', padding: '0.5rem' }}>
+                    {mortgages.map((m) => {
+                      const sim = simulateMortgageTimeline(mortgageToTimelineInput(m));
+                      const remainingToday = sim.remainingAt(mortgagesTodayIso);
+                      const nextRow = sim.rows.find((r) => r.date >= mortgagesTodayIso);
+                      const renegCount = (m.renegotiations || []).length;
+                      const isAuto = m.autoPost !== false;
+                      const isExpanded = expandedMortgageId === m.id;
+                      const upcomingRows = sim.rows.filter((r) => r.date >= mortgagesTodayIso).slice(0, 12);
+                      const isRenegTarget = renegotiationForId === m.id;
+
+                      const renegNewPayment = isRenegTarget && renegSim && renegotiationDraft.date
+                        ? ((renegSim.rows.find((r) => r.date >= renegotiationDraft.date) || renegSim.rows[renegSim.rows.length - 1])?.payment ?? 0)
+                        : 0;
+                      const renegNewPaymentDelta = isRenegTarget && renegSim && renegTargetCurrentSim
+                        ? renegNewPayment - renegTargetCurrentSim.currentMonthlyPayment
+                        : 0;
+                      const renegInterestDelta = isRenegTarget && renegSim && renegTargetCurrentSim
+                        ? renegSim.totalInterest - renegTargetCurrentSim.totalInterest
+                        : 0;
+
+                      return (
+                        <div
+                          key={m.id}
+                          style={{
+                            padding: '1rem',
+                            border: '1px solid var(--border)',
+                            borderRadius: '12px',
+                            backgroundColor: 'var(--overlay-subtle)',
+                            opacity: m.isActive ? 1 : 0.65,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.75rem'
+                          }}
+                        >
+                          {/* Intestazione card (clicca per espandere) */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setExpandedMortgageId(isExpanded ? null : m.id)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedMortgageId(isExpanded ? null : m.id); } }}
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem', cursor: 'pointer' }}
+                          >
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: m.isActive ? 'var(--warning)' : 'var(--muted)' }} />
+                                <strong style={{ fontSize: '1rem' }}>{m.name}</strong>
+                                <span style={{ fontSize: '0.75rem', color: 'var(--muted)', background: 'var(--overlay-medium)', padding: '2px 8px', borderRadius: '6px' }}>
+                                  {m.type === 'italian' ? 'Ammortamento Italiano' : 'Ammortamento Francese'}
+                                </span>
+                                {renegCount > 0 && (
+                                  <span style={{ fontSize: '0.72rem', color: 'var(--info)', background: 'var(--info-soft)', border: '1px solid var(--info-border)', padding: '2px 8px', borderRadius: '6px', fontWeight: 600 }}>
+                                    🔄 {renegCount} rinegoziazione{renegCount === 1 ? '' : 'i'}
+                                  </span>
+                                )}
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(e) => { e.stopPropagation(); handleToggleMortgageAutoPost(m.id); }}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); handleToggleMortgageAutoPost(m.id); } }}
+                                  title="Clicca per attivare/disattivare l'inserimento automatico delle rate"
+                                  style={{
+                                    fontSize: '0.7rem',
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    backgroundColor: isAuto ? 'var(--warning-soft)' : 'var(--overlay-medium)',
+                                    color: isAuto ? 'var(--warning)' : 'var(--muted)',
+                                    border: isAuto ? '1px solid var(--warning-border)' : '1px solid var(--border)',
+                                  }}
+                                >
+                                  {isAuto ? '⚡ Auto-rate: ON' : '⏸ Auto-rate: OFF'}
+                                </span>
+                              </div>
+                              <p style={{ fontSize: '0.8rem', color: 'var(--muted)', margin: 0 }}>
+                                {m.bank ? `${m.bank} · ` : ''}{m.annualRatePercent.toFixed(2)}% TAN · {m.years} anni · rata il {m.installmentDay}° · Conto: <strong style={{ color: 'var(--text)' }}>{m.account || 'Predefinito'}</strong>
+                              </p>
+                              {m.lastPostedDate && (
+                                <p style={{ fontSize: '0.75rem', color: 'var(--success)', margin: '4px 0 0 0' }}>
+                                  ✓ Ultima rata registrata: {formatDisplayDate(m.lastPostedDate)}
+                                </p>
+                              )}
+                            </div>
+
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '1.1rem', color: 'var(--warning)', display: 'block' }}>
+                                {formatEuro(sim.currentMonthlyPayment)}
+                              </span>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>
+                                rata attuale {isExpanded ? '▾' : '▸'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Figure rapide */}
+                          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                            <div style={{ flex: 1, minWidth: '110px', padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Capitale residuo</span>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>{formatEuro(remainingToday)}</div>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '110px', padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Interessi totali</span>
+                              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>{formatEuro(sim.totalInterest)}</div>
+                            </div>
+                            <div style={{ flex: 1, minWidth: '110px', padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                              <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Estinzione</span>
+                              <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>{sim.payoffDate ? formatDisplayDate(sim.payoffDate) : '—'}</div>
+                            </div>
+                          </div>
+
+                          {/* Azioni */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', paddingTop: '6px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                            {m.isActive && nextRow && (
+                              <button
+                                className="pill"
+                                type="button"
+                                onClick={() => handlePostMortgageInstallmentManual(m)}
+                                title="Registra oggi la rata in scadenza più vicina"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'var(--warning-soft)', color: 'var(--warning)', border: '1px solid var(--warning-border)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                ⚡ Registra Rata {formatEuro(nextRow.payment)}
+                              </button>
+                            )}
+                            {m.isActive && (
+                              <button
+                                className="pill"
+                                type="button"
+                                onClick={() => handleStartRenegotiation(m)}
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'var(--info-soft)', color: 'var(--info)', border: '1px solid var(--info-border)' }}
+                              >
+                                🔄 Rinegozia
+                              </button>
+                            )}
+                            <button
+                              className="pill"
+                              type="button"
+                              onClick={() => handleToggleMortgage(m.id)}
+                              style={{ padding: '4px 10px', fontSize: '0.75rem', background: m.isActive ? 'var(--success-soft)' : 'var(--overlay-medium)', color: m.isActive ? 'var(--success)' : 'var(--muted)' }}
+                            >
+                              {m.isActive ? 'Attivo' : 'In Pausa'}
+                            </button>
+                            <button
+                              className="pill"
+                              type="button"
+                              onClick={() => handleEditMortgage(m)}
+                              style={{
+                                padding: '4px 10px',
+                                fontSize: '0.75rem',
+                                background: editingMortgageId === m.id ? 'var(--accent)' : 'var(--overlay-medium)',
+                                color: editingMortgageId === m.id ? 'var(--pill-primary-text)' : 'var(--text)',
+                                fontWeight: editingMortgageId === m.id ? 700 : 500
+                              }}
+                            >
+                              Modifica
+                            </button>
+                            <button
+                              className="pill"
+                              type="button"
+                              onClick={() => handleDeleteMortgage(m.id)}
+                              style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'var(--danger-soft)', color: 'var(--danger)' }}
+                            >
+                              Elimina
+                            </button>
+                          </div>
+
+                          {/* Dettagli espansi */}
+                          {isExpanded && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border)' }}>
+                              {/* Dati contratto */}
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.6rem' }}>
+                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Capitale iniziale</span>
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', marginTop: '2px' }}>{formatEuro(m.principal)}</div>
+                                </div>
+                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Erogazione</span>
+                                  <div style={{ fontWeight: 700, fontSize: '0.92rem', marginTop: '2px' }}>{formatDisplayDate(m.startDate)}</div>
+                                </div>
+                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Rata extra mensile</span>
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', marginTop: '2px' }}>{m.extraMonthlyPayment ? formatEuro(m.extraMonthlyPayment) : '—'}</div>
+                                </div>
+                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Spese iniziali</span>
+                                  <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', marginTop: '2px' }}>{m.initialCosts ? formatEuro(m.initialCosts) : '—'}</div>
+                                </div>
+                                <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                  <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Categoria</span>
+                                  <div style={{ fontWeight: 600, fontSize: '0.92rem', marginTop: '2px' }}>{m.category}{m.subcategory ? ` · ${m.subcategory}` : ''}</div>
+                                </div>
+                                {m.notes && (
+                                  <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)', gridColumn: 'span 2' }}>
+                                    <span style={{ fontSize: '0.66rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Note</span>
+                                    <div style={{ fontWeight: 500, fontSize: '0.85rem', marginTop: '2px' }}>{m.notes}</div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Rinegoziazioni applicate */}
+                              {renegCount > 0 && (
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+                                    🔄 Rinegoziazioni applicate ({renegCount})
+                                  </p>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    {(m.renegotiations || []).map((r) => (
+                                      <div
+                                        key={r.id}
+                                        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 0.8rem', borderRadius: '8px', background: 'var(--info-soft)', border: '1px solid var(--info-border)', flexWrap: 'wrap' }}
+                                      >
+                                        <div style={{ flex: 1, minWidth: '200px' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                            <strong style={{ fontSize: '0.85rem' }}>{formatDisplayDate(r.date)}</strong>
+                                            <span style={{ fontSize: '0.72rem', color: 'var(--info)', fontWeight: 600 }}>Nuovo TAN {r.newAnnualRatePercent.toFixed(2)}%</span>
+                                            <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>· Durata residua: {r.newRemainingYears} anni</span>
+                                            {r.costs > 0 && <span style={{ fontSize: '0.72rem', color: 'var(--muted)' }}>· Spese: {formatEuro(r.costs)}</span>}
+                                          </div>
+                                          {r.notes && <p style={{ margin: '3px 0 0 0', fontSize: '0.75rem', color: 'var(--muted)' }}>{r.notes}</p>}
+                                        </div>
+                                        <button
+                                          className="pill"
+                                          type="button"
+                                          onClick={() => handleDeleteRenegotiation(m.id, r.id)}
+                                          title="Rimuovi questa rinegoziazione"
+                                          style={{ padding: '3px 8px', fontSize: '0.7rem', background: 'var(--danger-soft)', color: 'var(--danger)', flexShrink: 0 }}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Form rinegoziazione */}
+                              {isRenegTarget && (
+                                <form
+                                  onSubmit={handleApplyRenegotiation}
+                                  style={{ padding: '1rem', borderRadius: '10px', background: 'var(--info-soft)', border: '1px solid var(--info-border)', display: 'flex', flexDirection: 'column', gap: '0.9rem' }}
+                                >
+                                  <div>
+                                    <p className="panel-title" style={{ marginBottom: '2px' }}>🔄 Nuova Rinegoziazione — {m.name}</p>
+                                    <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--muted)' }}>
+                                      Dal giorno scelto il piano viene ricalcolato sul capitale residuo con le nuove condizioni.
+                                    </p>
+                                  </div>
+
+                                  <div className="form-grid">
+                                    <label className="form-field">
+                                      <span>Data Applicazione</span>
+                                      <input
+                                        type="date"
+                                        value={renegotiationDraft.date}
+                                        onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, date: e.target.value }))}
+                                        required
+                                      />
+                                    </label>
+                                    <label className="form-field">
+                                      <span>Nuovo TAN Annuo (%)</span>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0"
+                                        value={renegotiationDraft.newAnnualRatePercent}
+                                        onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, newAnnualRatePercent: e.target.value }))}
+                                        placeholder="Es. 2.90"
+                                        required
+                                      />
+                                    </label>
+                                    <label className="form-field">
+                                      <span>Nuova Durata Residua (anni)</span>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        value={renegotiationDraft.newRemainingYears}
+                                        onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, newRemainingYears: e.target.value }))}
+                                        placeholder="Es. 20"
+                                        required
+                                      />
+                                    </label>
+                                    <label className="form-field">
+                                      <span>Spese Sostenute (€)</span>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0"
+                                        value={renegotiationDraft.costs}
+                                        onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, costs: e.target.value }))}
+                                        placeholder="0.00 (opzionale)"
+                                      />
+                                    </label>
+                                    <label className="form-field" style={{ gridColumn: 'span 2' }}>
+                                      <span>Note</span>
+                                      <input
+                                        type="text"
+                                        value={renegotiationDraft.notes}
+                                        onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, notes: e.target.value }))}
+                                        placeholder="Es. Surroga, spread ridotto, penale sostenuta..."
+                                      />
+                                    </label>
+                                  </div>
+
+                                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={renegotiationDraft.recordCosts}
+                                      onChange={(e) => setRenegotiationDraft(prev => ({ ...prev, recordCosts: e.target.checked }))}
+                                      style={{ accentColor: 'var(--accent)' }}
+                                    />
+                                    <span style={{ fontWeight: 600, color: 'var(--text)' }}>Registra le spese come transazione di uscita</span>
+                                  </label>
+
+                                  {/* Anteprima confronto condizioni */}
+                                  {renegSim && renegTargetCurrentSim && (
+                                    <div style={{ padding: '0.85rem', borderRadius: '8px', background: 'var(--panel-card-bg)', border: '1px solid var(--border)' }}>
+                                      <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+                                        📊 Confronto Condizioni
+                                      </p>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.6rem' }}>
+                                        <div>
+                                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Capitale residuo alla data</span>
+                                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>
+                                            {formatEuro(renegTargetCurrentSim.remainingAt(renegotiationDraft.date || mortgagesTodayIso))}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Rata attuale</span>
+                                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--muted)', marginTop: '2px' }}>
+                                            {formatEuro(renegTargetCurrentSim.currentMonthlyPayment)}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Nuova rata</span>
+                                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--info)', marginTop: '2px' }}>
+                                            {formatEuro(renegNewPayment)}
+                                          </div>
+                                          {renegNewPaymentDelta !== 0 && (
+                                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: renegNewPaymentDelta < 0 ? 'var(--success)' : 'var(--danger)' }}>
+                                              {renegNewPaymentDelta > 0 ? '+' : ''}{formatEuro(renegNewPaymentDelta)} /mese
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Estinzione</span>
+                                          <div style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>
+                                            {renegSim.payoffDate ? formatDisplayDate(renegSim.payoffDate) : '—'}
+                                          </div>
+                                          {renegTargetCurrentSim.payoffDate && renegSim.payoffDate && renegSim.payoffDate !== renegTargetCurrentSim.payoffDate && (
+                                            <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>
+                                              prima: {formatDisplayDate(renegTargetCurrentSim.payoffDate)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Interessi totali</span>
+                                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: '0.92rem', color: 'var(--text)', marginTop: '2px' }}>
+                                            {formatEuro(renegSim.totalInterest)}
+                                          </div>
+                                          {renegInterestDelta !== 0 && (
+                                            <span style={{ fontSize: '0.68rem', fontWeight: 700, color: renegInterestDelta < 0 ? 'var(--success)' : 'var(--danger)' }}>
+                                              {renegInterestDelta > 0 ? '+' : ''}{formatEuro(renegInterestDelta)}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="form-actions">
+                                    <button className="pill pill-primary" type="submit">Applica Rinegoziazione</button>
+                                    <button className="pill" type="button" onClick={handleCancelRenegotiation}>Annulla</button>
+                                  </div>
+                                </form>
+                              )}
+
+                              {/* Rate in arrivo */}
+                              {upcomingRows.length > 0 && (
+                                <div>
+                                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+                                    📅 Prossime {upcomingRows.length} rate
+                                  </p>
+                                  <div className="transaction-table" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+                                    <table style={{ width: '100%' }}>
+                                      <thead>
+                                        <tr>
+                                          <th>Data</th>
+                                          <th style={{ textAlign: 'right' }}>Rata</th>
+                                          <th style={{ textAlign: 'right' }}>Capitale</th>
+                                          <th style={{ textAlign: 'right' }}>Interessi</th>
+                                          <th style={{ textAlign: 'right' }}>Residuo</th>
+                                          <th>Fase</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {upcomingRows.map((row) => (
+                                          <tr key={row.date}>
+                                            <td style={{ fontSize: '0.78rem' }}>{formatDisplayDate(row.date)}</td>
+                                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', fontWeight: 600 }}>{formatEuro(row.payment)}</td>
+                                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--muted)' }}>{formatEuro(row.principal)}</td>
+                                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--muted)' }}>{formatEuro(row.interest)}</td>
+                                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>{formatEuro(row.remaining)}</td>
+                                            <td>
+                                              {row.phase > 0 ? (
+                                                <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', background: 'var(--info-soft)', color: 'var(--info)', border: '1px solid var(--info-border)' }}>
+                                                  🔄 Rineg.
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: '0.68rem', color: 'var(--muted)' }}>Originario</span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </article>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 5: Cashback & Saveback Manager */}
         {recurringViewMode === 'cashback' && (
           <CashbackManager
             cashbackRules={cashbackRules}

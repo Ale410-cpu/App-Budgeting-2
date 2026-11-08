@@ -1043,6 +1043,35 @@ export async function parseNumbersBuffer(
     };
   }
 
+  // Protezione decompression bomb: un .numbers è un archivio ZIP che può
+  // dichiarare dimensioni decomprese enormi. Prima di estrarre qualsiasi
+  // contenuto si verifica il totale dei byte dichiarati dagli entry.
+  try {
+    const MAX_NUMBERS_UNCOMPRESSED = 200 * 1024 * 1024; // 200 MB
+    let totalUncompressed = 0;
+    for (const name of Object.keys(zipContent.files)) {
+      const entry = zipContent.files[name] as any;
+      const size = entry?._data?.uncompressedSize;
+      if (typeof size === 'number' && Number.isFinite(size) && size > 0) {
+        totalUncompressed += size;
+      }
+      if (totalUncompressed > MAX_NUMBERS_UNCOMPRESSED) {
+        return {
+          transactions: [],
+          skipped: 0,
+          fileType: 'numbers',
+          detectedFormatName: 'Apple Numbers Danneggiato',
+          headersDetected: [],
+          totalRows: 0,
+          accountSuggestions: [],
+          warnings: [
+            'Archivio Numbers sospetto (dimensione decomposta eccessiva): importazione annullata per sicurezza.',
+          ],
+        };
+      }
+    }
+  } catch {}
+
   // 1. Metodo primario ad alta fedeltà: QuickLook/Preview.pdf
   const previewPdfFile =
     zipContent.file('QuickLook/Preview.pdf') ||

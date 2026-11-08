@@ -16,6 +16,7 @@ import {
   Info,
   Clock,
   Sparkles,
+  HandCoins,
 } from 'lucide-react';
 import {
   getNotificationSupportStatus,
@@ -27,6 +28,7 @@ import {
   requestAppNotificationPermission,
   sendAppNotification,
   sendTestTransactionReminder,
+  sendTestReimbursementReminder,
   AppNotification,
   NotificationSettings,
   NativeNotificationCapability,
@@ -69,6 +71,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   const [feedbackMessage, setFeedbackMessage] = useState<string>('');
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [isTestingReminder, setIsTestingReminder] = useState<boolean>(false);
+  const [isTestingReimbursement, setIsTestingReimbursement] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'settings' | 'history' | 'guide'>('settings');
 
   // Determine if light theme is active either from prop or document element class
@@ -177,6 +180,29 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
     setFeedbackMessage('Cronologia notifiche svuotata.');
   };
 
+  const handleSendTestReimbursement = async () => {
+    setIsTestingReimbursement(true);
+    setFeedbackMessage('');
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        await requestAppNotificationPermission();
+        setSupportStatus(getNotificationSupportStatus());
+      }
+
+      const res = await sendTestReimbursementReminder();
+      if (res.success) {
+        setFeedbackMessage(describeDelivery(res.channel, res.deliveredToSystem));
+        setHistory(loadNotificationHistory());
+      } else {
+        setFeedbackMessage(`${res.error || 'Invio avviso rimborso non riuscito.'}`);
+      }
+    } catch (err: any) {
+      setFeedbackMessage(`Errore invio avviso rimborso: ${err?.message || err}`);
+    } finally {
+      setIsTestingReimbursement(false);
+    }
+  };
+
   const isGranted = supportStatus.permission === 'granted';
   const isDenied = supportStatus.permission === 'denied';
 
@@ -269,7 +295,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                 </span>
               </div>
               <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--muted)' }}>
-                Avvisi per superamento budget, spese ricorrenti e promemoria transazioni (macOS)
+                Avvisi per superamento budget, spese ricorrenti, rimborsi e promemoria transazioni (macOS)
               </p>
             </div>
           </div>
@@ -686,6 +712,65 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
                 <div style={{ height: '1px', background: 'var(--border)' }} />
 
+                {/* Reimbursement Alerts toggle */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <HandCoins size={16} color="var(--success)" />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)' }}>Avvisi Rimborsi</div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--muted)' }}>
+                          Sollecita i rimborsi in ritardo, in scadenza oggi o nei prossimi 7 giorni e conferma gli incassi
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSetting('reimbursementAlerts')}
+                      style={{
+                        background: settings.reimbursementAlerts ? 'var(--success)' : 'var(--input-bg)',
+                        color: settings.reimbursementAlerts ? 'var(--on-solid)' : 'var(--muted)',
+                        border: `1px solid ${settings.reimbursementAlerts ? 'var(--success-strong)' : 'var(--border-strong)'}`,
+                        borderRadius: '20px',
+                        padding: '4px 12px',
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {settings.reimbursementAlerts ? 'Sì' : 'No'}
+                    </button>
+                  </div>
+
+                  {settings.reimbursementAlerts && (
+                    <div style={{ marginLeft: '24px' }}>
+                      <button
+                        type="button"
+                        onClick={handleSendTestReimbursement}
+                        disabled={isTestingReimbursement}
+                        title="Invia subito una notifica di esempio per un rimborso in scadenza"
+                        style={{
+                          background: 'var(--input-bg)',
+                          color: 'var(--success)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '4px 10px',
+                          fontSize: '0.72rem',
+                          fontWeight: 600,
+                          cursor: isTestingReimbursement ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                        }}
+                      >
+                        <Sparkles size={12} /> {isTestingReimbursement ? 'Invio...' : 'Testa avviso rimborso'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ height: '1px', background: 'var(--border)' }} />
+
                 {/* Sound chime toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -791,6 +876,9 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                   </p>
                   <p style={{ margin: 0 }}>
                     • <strong>Promemoria spese</strong>: L'applicazione verificherà a ogni intervallo scelto se hai registrato movimenti recenti, inviando un promemoria per aiutarti a tenere il bilancio aggiornato.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    • <strong>Rimborsi</strong>: Per le spese contrassegnate "da rimborsare", l'app avvisa quando la data concordata è in ritardo, è di oggi o si avvicina (entro 7 giorni), e ti conferma l'incasso quando registri un rimborso (parziale o completo).
                   </p>
                 </div>
               </div>

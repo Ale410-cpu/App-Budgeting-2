@@ -24,7 +24,7 @@ export interface AppNotification {
   id: string;
   title: string;
   body: string;
-  category: 'budget' | 'recurring' | 'goal' | 'system' | 'summary';
+  category: 'budget' | 'recurring' | 'goal' | 'system' | 'summary' | 'reimbursement';
   timestamp: number;
   read?: boolean;
 }
@@ -48,6 +48,7 @@ export interface NotificationSettings {
   summaryAlerts: boolean;
   transactionReminderEnabled: boolean;
   transactionReminderIntervalHours: number;
+  reimbursementAlerts: boolean;
 }
 
 const SETTINGS_KEY = 'budget_app_notification_settings';
@@ -64,6 +65,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   summaryAlerts: true,
   transactionReminderEnabled: true,
   transactionReminderIntervalHours: 24,
+  reimbursementAlerts: true,
 };
 
 // Platform detection utilities
@@ -279,7 +281,7 @@ export const requestAppNotificationPermission = async (): Promise<{
 export const sendAppNotification = async (params: {
   title: string;
   body: string;
-  category?: 'budget' | 'recurring' | 'goal' | 'system' | 'summary';
+  category?: 'budget' | 'recurring' | 'goal' | 'system' | 'summary' | 'reimbursement';
   silent?: boolean;
   tag?: string;
 }): Promise<{
@@ -299,6 +301,7 @@ export const sendAppNotification = async (params: {
   if (category === 'budget' && !settings.budgetAlerts) return { success: false, error: 'Avvisi budget disattivati' };
   if (category === 'recurring' && !settings.recurringReminders) return { success: false, error: 'Promemoria ricorrenti disattivati' };
   if (category === 'goal' && !settings.goalAlerts) return { success: false, error: 'Avvisi obiettivi disattivati' };
+  if (category === 'reimbursement' && !settings.reimbursementAlerts) return { success: false, error: 'Avvisi rimborsi disattivati' };
   if (category === 'summary' && !settings.summaryAlerts && !settings.transactionReminderEnabled) {
     return { success: false, error: 'Promemoria disattivati' };
   }
@@ -579,5 +582,205 @@ export const sendTestTransactionReminder = async (): Promise<{
     body: 'Questo è un promemoria di prova: ricordati di registrare i nuovi scontrini, uscite o bonifici per avere il budget aggiornato!',
     category: 'summary',
     tag: 'transaction-reminder-test',
+  });
+};
+
+// === Rimborso (refund) notifications ===
+
+/**
+ * A spesa in attesa di rimborso da valutare per le notifiche automatiche.
+ * Compilata dal chiamante (App.tsx) a partire dal reimbursementMap.
+ */
+export interface ReimbursementAlertItem {
+  /** Id della spesa originaria */
+  expenseId: string;
+  /** Esercente o categoria della spesa anticipata */
+  merchant: string;
+  /** Categoria di budget della spesa */
+  category: string;
+  /** Importo ancora da recuperare */
+  remainingAmount: number;
+  /** Importo già incassato (rimborsi parziali) */
+  totalReimbursed: number;
+  /** Data concordata per il rimborso (YYYY-MM-DD), se presente */
+  dueDate?: string;
+  /** Data della spesa originaria */
+  expenseDate: string;
+  status: 'pending' | 'partial';
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Formatta una data YYYY-MM-DD in italiano leggibile (es. "5 novembre 2026"). */
+const formatReimbursementDueDate = (isoDate: string): string => {
+  const d = new Date(`${isoDate}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return isoDate;
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+};
+
+/**
+ * Controlla le spese ancora da rimborsare e invia una notifica di sistema quando:
+ *  - il rimborso è **in ritardo** (data concordata già trascorsa)
+ *  - il rimborso **scade oggi**
+ *  - il rimborso **scade entro 7 giorni** (un solo preavviso per data concordata)
+ *
+ * Anti-spam: ritardo e scadenza odierna vengono segnalati al massimo una volta
+ * al giorno per spesa; il preavviso viene inviato una sola volta per ciascuna
+ * data di scadenza. Ogni esecuzione notifica al massimo 5 spese, dando priorità
+ * ai ritardi, poi alle scadenze del giorno, infine ai preavvisi.
+ */
+export const checkAndTriggerReimbursementAlerts = async (options: {
+  items: ReimbursementAlertItem[];
+}): Promise<number> => {
+  const settings = loadNotificationSettings();
+  if (!settings.enabled || !settings.reimbursementAlerts) return 0;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayDateStr = today.toISOString().split('T')[0];
+  const todayMs = today.getTime();
+
+  // Registry of sent alerts to prevent duplicate spamming (shared with other checks)
+  let sentRegistry: Record<string, string> = {};
+  try {
+    const raw = localStorage.getItem(SENT_REGISTRY_KEY);
+    if (raw) sentRegistry = JSON.parse(raw);
+  } catch {}
+
+  type ReimbursementAlertTask = {
+    key: string;
+    item: ReimbursementAlertItem;
+    variant: 'overdue' | 'today' | 'soon';
+    days: number;
+  };
+
+  const tasks: ReimbursementAlertTask[] = [];
+
+  for (const item of options.items) {
+    if (!item.dueDate) continue;
+
+    const due = new Date(`${item.dueDate}T12:00:00`);
+    if (Number.isNaN(due.getTime())) continue;
+    const dueMs = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+    const diffDays = Math.round((dueMs - todayMs) / DAY_MS);
+
+    if (diffDays < 0) {
+      // In ritardo: sollecito quotidiano finché non viene saldato
+      const key = `reimb_overdue_${item.expenseId}_${todayDateStr}`;
+      if (!sentRegistry[key]) {
+        tasks.push({ key, item, variant: 'overdue', days: Math.abs(diffDays) });
+      }
+    } else if (diffDays === 0) {
+      const key = `reimb_today_${item.expenseId}_${todayDateStr}`;
+      if (!sentRegistry[key]) {
+        tasks.push({ key, item, variant: 'today', days: 0 });
+      }
+    } else if (diffDays <= 7) {
+      // Preavviso: una sola notifica per ciascuna data di scadenza concordata
+      const key = `reimb_soon_${item.expenseId}_${item.dueDate}`;
+      if (!sentRegistry[key]) {
+        tasks.push({ key, item, variant: 'soon', days: diffDays });
+      }
+    }
+  }
+
+  // Priorità: prima i ritardi, poi le scadenze odierne, infine i preavvisi
+  const rank = { overdue: 0, today: 1, soon: 2 } as const;
+  tasks.sort((a, b) => {
+    if (rank[a.variant] !== rank[b.variant]) return rank[a.variant] - rank[b.variant];
+    return a.days - b.days;
+  });
+
+  let alertCount = 0;
+
+  for (const task of tasks.slice(0, 5)) {
+    const { item, variant, days } = task;
+    sentRegistry[task.key] = todayDateStr;
+    alertCount++;
+
+    const label = item.merchant || item.category;
+    const amountText = `€ ${item.remainingAmount.toFixed(2)}`;
+    const partialNote =
+      item.status === 'partial'
+        ? ` (già rimborsati € ${item.totalReimbursed.toFixed(2)})`
+        : '';
+
+    if (variant === 'overdue') {
+      await sendAppNotification({
+        title: `Rimborso in ritardo: ${label}`,
+        body: `Il rimborso di ${amountText} per "${label}" era atteso ${days === 1 ? 'ieri' : `${days} giorni fa`}${partialNote}. Sollecita chi deve restituirti i soldi.`,
+        category: 'reimbursement',
+        tag: `reimb-overdue-${item.expenseId}`,
+      });
+    } else if (variant === 'today') {
+      await sendAppNotification({
+        title: `Rimborso in scadenza oggi: ${label}`,
+        body: `Oggi scade il rimborso di ${amountText} per "${label}"${partialNote}.`,
+        category: 'reimbursement',
+        tag: `reimb-today-${item.expenseId}`,
+      });
+    } else {
+      await sendAppNotification({
+        title: `Rimborso in scadenza tra ${days} ${days === 1 ? 'giorno' : 'giorni'}: ${label}`,
+        body: `Il ${formatReimbursementDueDate(item.dueDate!)} scade il rimborso di ${amountText} per "${label}"${partialNote}.`,
+        category: 'reimbursement',
+        tag: `reimb-soon-${item.expenseId}`,
+      });
+    }
+  }
+
+  if (alertCount > 0) {
+    try {
+      localStorage.setItem(SENT_REGISTRY_KEY, JSON.stringify(sentRegistry));
+    } catch {}
+  }
+
+  return alertCount;
+};
+
+/**
+ * Conferma immediata all'utente quando incassa un rimborso (entrata collegata
+ * a una spesa "da rimborsare"). Distingue rimborso parziale e rimborso
+ * completo (spesa interamente saldata).
+ */
+export const sendReimbursementReceivedNotification = async (params: {
+  expenseMerchant: string;
+  amount: number;
+  remainingAmount: number;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  deliveredToSystem?: boolean;
+  deliveredInApp?: boolean;
+  channel?: NotificationChannel;
+}> => {
+  const label = params.expenseMerchant || 'spesa';
+  const settled = params.remainingAmount <= 0.009;
+
+  return sendAppNotification({
+    title: settled ? `Rimborso completato: ${label}` : `Rimborso ricevuto: ${label}`,
+    body: settled
+      ? `Accredito di € ${params.amount.toFixed(2)}: la spesa "${label}" è stata interamente rimborsata.`
+      : `Incassati € ${params.amount.toFixed(2)} per "${label}": restano ancora da recuperare € ${params.remainingAmount.toFixed(2)}.`,
+    category: 'reimbursement',
+    tag: `reimb-received-${label}`,
+  });
+};
+
+/**
+ * Sends an immediate test reminder for reimbursement due dates
+ */
+export const sendTestReimbursementReminder = async (): Promise<{
+  success: boolean;
+  error?: string;
+  deliveredToSystem?: boolean;
+  deliveredInApp?: boolean;
+  channel?: NotificationChannel;
+}> => {
+  return sendAppNotification({
+    title: 'Rimborso in scadenza tra 3 giorni: Ristorante di prova',
+    body: 'Tra 3 giorni (esempio) scade il rimborso di € 42,50 per "Ristorante di prova". Riceverai un avviso per ogni rimborso in ritardo, in scadenza oggi o in arrivo nei prossimi 7 giorni.',
+    category: 'reimbursement',
+    tag: 'reimbursement-test',
   });
 };

@@ -142,12 +142,6 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
         unlinkPrimaryFile: function () { return call('unlinkPrimaryFile'); },
         linkPrimaryFile: function () { return call('linkPrimaryFile'); },
         reloadPrimaryFile: function () { return call('reloadPrimaryFile'); },
-        debugEval: function (code) {
-          window.webkit.messageHandlers.budgetApp.postMessage({
-            id: 'debug-' + Date.now(), method: 'debugEval', args: { code: code }
-          });
-          return true;
-        },
         onUpdateProgress: subscribe('updateProgress'),
         onDataUpdatedOnDisk: subscribe('dataUpdatedOnDisk')
       };
@@ -216,21 +210,6 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
                let level = payload["level"] as? String,
                let text = payload["text"] as? String {
                 NSLog("[Web %@] %@", level, text)
-            }
-        case "debugEval":
-            // Strumento di diagnostica: esegue un'espressione JS nella WebView
-            // e riporta il risultato nel log del dispositivo.
-            if let payload = args as? [String: Any],
-               let code = payload["code"] as? String {
-                DispatchQueue.main.async {
-                    self.webView?.evaluateJavaScript(code) { result, error in
-                        if let error {
-                            NSLog("[Debug] errore: %@", error.localizedDescription)
-                        } else {
-                            NSLog("[Debug] risultato: %@", String(describing: result ?? "nil"))
-                        }
-                    }
-                }
             }
         default:
             reply(id, error: "Metodo nativo sconosciuto: \(method)")
@@ -882,8 +861,10 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
         let wrapper = args as? [String: Any]
         let rawUrl = (wrapper?["downloadUrl"] as? String) ?? (wrapper?["apiUrl"] as? String)
 
-        guard let rawUrl, let url = URL(string: rawUrl) else {
-            reply(id, error: "Link di download non disponibile")
+        // L'URL arriva da metadati di release remoti: solo HTTPS verso host
+        // GitHub, validato qui in modo autorevole (il renderer controlla già).
+        guard let rawUrl, let url = BudgetBridge.allowedUpdateUrl(rawUrl) else {
+            reply(id, error: "Link di download non valido o non consentito")
             return
         }
 
@@ -971,7 +952,14 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
     // MARK: - Esterno
 
     private func openExternal(_ args: Any?, replyTo id: String) {
-        guard let raw = args as? String, let url = URL(string: raw) else {
+        // Solo link HTTP(S): schema e host arrivano anche da metadati remoti
+        // (release GitHub) e non vanno mai fidati ciecamente.
+        guard let raw = args as? String,
+              let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = url.host,
+              !host.isEmpty else {
             reply(id, value: false)
             return
         }
@@ -979,22 +967,6 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
         DispatchQueue.main.async {
             UIApplication.shared.open(url, options: [:]) { success in
                 self.reply(id, value: success)
-            }
-        }
-    }
-
-    // MARK: - Diagnostica
-
-    /// Esegue un'espressione JavaScript nella WebView e riporta il risultato
-    /// nel log del dispositivo (solo diagnostica).
-    func debugEval(_ code: String) {
-        DispatchQueue.main.async {
-            self.webView?.evaluateJavaScript(code) { result, error in
-                if let error {
-                    NSLog("[Debug] errore: %@", error.localizedDescription)
-                } else {
-                    NSLog("[Debug] %@", String(describing: result ?? "nil"))
-                }
             }
         }
     }
@@ -1146,6 +1118,21 @@ final class BudgetBridge: NSObject, WKScriptMessageHandler, UIDocumentPickerDele
             top = presented
         }
         return top
+    }
+
+    /// Solo URL HTTPS verso host GitHub: i metadati di aggiornamento (release
+    /// JSON) sono dati remoti e non vanno mai fidati ciecamente.
+    private static func allowedUpdateUrl(_ raw: String?) -> URL? {
+        guard let raw,
+              let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https",
+              let host = url.host?.lowercased() else {
+            return nil
+        }
+        if host == "github.com" || host == "api.github.com" || host == "codeload.github.com" { return url }
+        if host.hasSuffix(".github.com") || host.hasSuffix(".githubusercontent.com") { return url }
+        return nil
     }
 
     private static func normalizeRepo(_ raw: String?) -> String {

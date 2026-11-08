@@ -1,5 +1,5 @@
 // Service Worker for Budget Ledger Offline Support
-const CACHE_NAME = 'budget-ledger-v0.3.29';
+const CACHE_NAME = 'budget-ledger-v0.4.0';
 
 const PRECACHE_URLS = [
   '/',

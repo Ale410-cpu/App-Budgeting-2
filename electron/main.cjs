@@ -1,7 +1,6 @@
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
 const child_process = require('child_process');
 const { app, BrowserWindow, ipcMain, nativeImage, shell, session, dialog, screen, Notification } = require('electron');
@@ -24,6 +23,36 @@ if (process.platform === 'win32' || process.platform === 'darwin') {
 
 const devServerUrl = 'http://127.0.0.1:3000';
 const TICKER_REGEX = /^[A-Z0-9.\-^=]{1,20}$/;
+
+/**
+ * Auto-update hardening.
+ *
+ * The update metadata (repository + release assets) is remote data and the
+ * user can point the app at any public GitHub repository: a download URL is
+ * therefore never trusted. Updates are accepted only over HTTPS from
+ * GitHub's own hosts, for the initial URL and for every redirect.
+ */
+const UPDATE_DOWNLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024; // 2GB safety cap
+
+function isAllowedUpdateUrl(url) {
+  if (typeof url !== 'string') return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') return false;
+  if (parsed.username || parsed.password) return false;
+  const host = parsed.hostname.toLowerCase();
+  return (
+    host === 'github.com' ||
+    host === 'api.github.com' ||
+    host === 'codeload.github.com' ||
+    host.endsWith('.github.com') ||
+    host.endsWith('.githubusercontent.com')
+  );
+}
 
 /**
  * Rimuove il campo `githubToken` da un payload destinato al disco.
@@ -277,17 +306,30 @@ function downloadFileWithRedirects(url, destPath, onProgress) {
     } catch {}
 
     const file = fs.createWriteStream(destPath);
+    // Defensive: a failed/aborted download must never crash the main process
+    // with an unhandled 'error' event on the write stream.
+    file.on('error', () => {});
     let totalBytes = 0;
     let receivedBytes = 0;
 
+    function fail(message) {
+      try { file.close(); } catch {}
+      try { fs.unlink(destPath, () => {}); } catch {}
+      reject(new Error(message));
+    }
+
     function get(currentUrl, redirectCount = 0) {
       if (redirectCount > 8) {
-        file.close();
-        fs.unlink(destPath, () => {});
-        return reject(new Error('Troppi reindirizzamenti durante il download.'));
+        return fail('Troppi reindirizzamenti durante il download.');
       }
 
-      const client = currentUrl.startsWith('https:') ? https : http;
+      // The download URL comes from remote release metadata: accept only
+      // HTTPS URLs towards GitHub hosts, for the initial URL and every
+      // redirect (blocks http:// downgrade and off-host redirects).
+      if (!isAllowedUpdateUrl(currentUrl)) {
+        return fail('Download non consentito: solo URL HTTPS di GitHub sono autorizzati.');
+      }
+
       const parsedUrl = new URL(currentUrl);
 
       const reqHeaders = {
@@ -295,7 +337,7 @@ function downloadFileWithRedirects(url, destPath, onProgress) {
         'Accept': parsedUrl.hostname === 'api.github.com' ? 'application/octet-stream' : '*/*',
       };
 
-      const req = client.get(
+      const req = https.get(
         currentUrl,
         {
           headers: reqHeaders,
@@ -307,6 +349,7 @@ function downloadFileWithRedirects(url, destPath, onProgress) {
               nextUrl = new URL(nextUrl, parsedUrl.origin).href;
             }
             res.resume();
+            // Redirect target is validated by the recursive get() call.
             return get(nextUrl, redirectCount + 1);
           }
 
@@ -317,9 +360,18 @@ function downloadFileWithRedirects(url, destPath, onProgress) {
           }
 
           totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+          if (totalBytes > UPDATE_DOWNLOAD_MAX_BYTES) {
+            res.resume();
+            return fail(`File di aggiornamento troppo grande (limite: ${Math.round(UPDATE_DOWNLOAD_MAX_BYTES / 1024 / 1024)} MB).`);
+          }
 
           res.on('data', (chunk) => {
             receivedBytes += chunk.length;
+            if (receivedBytes > UPDATE_DOWNLOAD_MAX_BYTES) {
+              req.destroy();
+              fail(`Download interrotto: superato il limite di ${Math.round(UPDATE_DOWNLOAD_MAX_BYTES / 1024 / 1024)} MB.`);
+              return;
+            }
             if (onProgress) {
               const percent = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0;
               onProgress({ percent, transferred: receivedBytes, total: totalBytes });
@@ -732,7 +784,7 @@ async function safeWriteJson(targetPath, data, primaryReferencePath = null) {
         }
       : data;
 
-  const tempPath = path.join(dir, `.user-data-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.tmp`);
+  const tempPath = path.join(dir, `.user-data-${Date.now()}-${crypto.randomUUID()}.tmp`);
   const serialized = JSON.stringify(payloadWithMeta, null, 2);
   lastWrittenHash = crypto.createHash('md5').update(serialized).digest('hex');
 
@@ -953,8 +1005,12 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false, // Allows local ES modules and bundled assets under file://
-      webSecurity: false, // Allows smooth local asset resolution without CORS blocks
+      // Hardening: the renderer only needs the contextBridge IPC surface, so
+      // it runs sandboxed with the same-origin policy enabled. Local assets
+      // (bundle, fonts, images) are classic file:// subresources and load
+      // fine without relaxing webSecurity.
+      sandbox: true,
+      webSecurity: true,
       allowRunningInsecureContent: false,
     },
   });
@@ -996,12 +1052,23 @@ function createWindow() {
   // Guard against arbitrary web navigation away from the application
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     try {
-      const isFileUrl = navigationUrl.startsWith('file://');
-      if (!isFileUrl) {
-        event.preventDefault();
-        if (navigationUrl.startsWith('https:') || navigationUrl.startsWith('http:')) {
-          shell.openExternal(navigationUrl);
+      if (navigationUrl.startsWith('file://')) {
+        // Single-page app: navigation is allowed only towards the app's own
+        // entry point, never towards arbitrary files on disk.
+        const localIndex = getIndexHtmlPath();
+        let targetPath = '';
+        try {
+          targetPath = decodeURIComponent(new URL(navigationUrl).pathname);
+        } catch {
+          targetPath = '';
         }
+        if (localIndex && targetPath && targetPath === localIndex) return;
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      if (navigationUrl.startsWith('https:') || navigationUrl.startsWith('http:')) {
+        shell.openExternal(navigationUrl);
       }
     } catch {
       event.preventDefault();
@@ -1079,7 +1146,7 @@ app.whenReady().then(() => {
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            "default-src 'self' file: data: blob:; script-src 'self' file: 'unsafe-inline' 'unsafe-eval' blob:; worker-src 'self' file: blob:; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' file: https://fonts.gstatic.com data:; img-src 'self' file: data: blob: https:; connect-src 'self' file: https://query1.finance.yahoo.com https://api.github.com https://github.com https://objects.githubusercontent.com ws: wss: http://localhost:* http://127.0.0.1:*;"
+            "default-src 'self' file: data: blob:; script-src 'self' file: 'unsafe-inline' blob:; worker-src 'self' file: blob:; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' file: https://fonts.gstatic.com data:; img-src 'self' file: data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; connect-src 'self' file: https://query1.finance.yahoo.com https://api.github.com https://github.com https://objects.githubusercontent.com ws://localhost:* ws://127.0.0.1:* http://localhost:* http://127.0.0.1:*;"
           ],
           'X-Content-Type-Options': ['nosniff'],
         },
@@ -1915,10 +1982,23 @@ ipcMain.handle('app:download-and-install-update', async (event, { downloadUrl, a
     throw new Error('downloadUrl è richiesto');
   }
 
-  const safeAssetName =
+  // The download URL comes from remote release metadata (the repository can
+  // be configured by the user): accept only HTTPS URLs towards GitHub hosts.
+  // The renderer validates as well; this is the authoritative check.
+  if (!isAllowedUpdateUrl(downloadUrl)) {
+    throw new Error('URL di download non valido: solo URL HTTPS di GitHub sono autorizzati.');
+  }
+  if (apiUrl && typeof apiUrl === 'string' && !isAllowedUpdateUrl(apiUrl)) {
+    throw new Error('URL API asset non valido: solo URL HTTPS di GitHub sono autorizzati.');
+  }
+
+  const rawAssetName =
     assetName && typeof assetName === 'string'
       ? path.basename(assetName.split('?')[0])
-      : `BudgetingMacApp-update-${Date.now()}.zip`;
+      : '';
+  const safeAssetName = /^[A-Za-z0-9._\- ]{1,200}$/.test(rawAssetName)
+    ? rawAssetName
+    : `BudgetingMacApp-update-${Date.now()}.zip`;
 
   const tempDir = app.getPath('temp');
   const targetFile = path.join(tempDir, safeAssetName);

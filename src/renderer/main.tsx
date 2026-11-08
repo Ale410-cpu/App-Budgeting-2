@@ -4,9 +4,16 @@ import App from './App';
 import './fonts.css';
 import './styles.css';
 import { initPrototypePollutionDefense } from './utils/security';
+import { preventWheelSpinOnNumberInputs } from './utils/numberInputWheelGuard';
 
 // Initialize anti-tampering and prototype pollution defenses immediately
 initPrototypePollutionDefense();
+
+// Impedisce che lo scorrimento del mouse/trackpad modifichi i valori
+// inseriti nei campi numerici (es. l'importo di una transazione)
+if (typeof document !== 'undefined') {
+  preventWheelSpinOnNumberInputs();
+}
 
 interface ErrorBoundaryProps {
   children: ReactNode;

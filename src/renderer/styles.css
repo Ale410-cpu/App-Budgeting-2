@@ -328,7 +328,11 @@ body,
   min-height: 100%;
   margin: 0;
   max-width: 100vw;
-  overflow-x: hidden;
+  /* "clip" invece di "hidden": hidden trasforma questi elementi in scroll
+     container (overflow-y calcolato a auto) e rompe position: sticky della
+     sidebar, che così scorre via con la pagina. clip taglia l'overflow
+     orizzontale senza creare un contesto di scroll. */
+  overflow-x: clip;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -429,7 +433,6 @@ img.brand-mark:hover {
 
 .brand h1,
 .topbar h2,
-.hero h3,
 .panel h4 {
   margin: 0;
   font-weight: 650;
@@ -492,8 +495,7 @@ img.brand-mark:hover {
 .sync-row,
 .category-meta,
 .panel-header,
-.transaction-row,
-.bottom-note {
+.transaction-row {
   display: flex;
   align-items: center;
 }
@@ -596,6 +598,7 @@ img.brand-mark:hover {
 }
 
 .transactions-layout,
+.budget-layout,
 .report-layout {
   align-items: start;
 }
@@ -649,6 +652,60 @@ img.brand-mark:hover {
   position: sticky;
   top: 18px;
   align-self: start;
+  /* Se il modulo è più alto della viewport, il pannello resta sempre
+     visibile e scorre internamente: così i pulsanti in fondo
+     (Aggiungi / Salva / Elimina) restano raggiungibili. */
+  max-height: calc(100vh - 36px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Autocomplete per categorie e sottocategorie: l'elenco dei suggerimenti
+   è scorrevole con rotella del mouse, trackpad, scrollbar e tastiera,
+   a differenza del popup nativo dei <datalist> che in Chromium/Electron
+   non risponde allo scorrimento. */
+.autocomplete {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.autocomplete-input {
+  width: 100%;
+}
+
+.autocomplete-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.autocomplete-option {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.autocomplete-option.is-active,
+.autocomplete-option:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .transaction-form {
@@ -665,6 +722,9 @@ img.brand-mark:hover {
 .form-field {
   display: grid;
   gap: 8px;
+  /* min-width: 0: evita che il contenuto intrinseco di un campo (es. un
+     select con opzioni lunghe) strozzi le colonne vicine nella griglia. */
+  min-width: 0;
 }
 
 .form-field span {
@@ -715,14 +775,41 @@ img.brand-mark:hover {
 }
 
 .subcategory-row {
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(110px, 0.6fr) minmax(0, 1.2fr) auto;
+  /* Flex con a capo automatico: i campi si ridimensionano e fluiscono in
+     base alla larghezza del pannello editor, invece di una griglia a 5
+     colonne rigide con minimi fissi che straripa e sovrappone i riquadri
+     quando la colonna editor è stretta. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 12px;
-  align-items: end;
   padding: 12px;
   border-radius: var(--radius-lg);
   background: var(--panel-card-bg);
   border: 1px solid var(--border);
+}
+
+.subcategory-row .form-field {
+  flex: 1 1 130px;
+  min-width: 0;
+}
+
+.subcategory-row .danger-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Griglia del modulo adattiva alla larghezza reale della colonna editor:
+   una colonna quando lo spazio è poco, due (o più) quando c'è posto.
+   auto-fit evita media/container query e funziona su ogni larghezza. */
+.budget-editor .form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 12px;
+}
+
+/* Il campo nota occupa sempre tutta la larghezza disponibile */
+.budget-editor .form-field-note {
+  grid-column: 1 / -1;
 }
 
 .form-field input:focus,
@@ -847,8 +934,13 @@ img.brand-mark:hover {
   padding: var(--workspace-pad);
   min-width: 0;
   width: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  /* "clip" invece di "hidden"/"auto": entrambi trasformano questo elemento
+     in uno scroll container che però non scorre mai (l'altezza cresce con
+     il contenuto e la pagina scorre nella finestra), rompendo
+     position: sticky dei moduli (transazioni e budget) che così scorrono
+     via con la pagina. clip taglia l'overflow orizzontale senza creare
+     un contesto di scroll. */
+  overflow-x: clip;
 }
 
 .topbar {
@@ -926,7 +1018,8 @@ img.brand-mark:hover {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(250px, 320px);
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--grid-gap);
   padding: var(--panel-pad);
   border-radius: var(--radius-lg);
@@ -936,21 +1029,9 @@ img.brand-mark:hover {
     var(--hero-bg);
 }
 
-.hero h3 {
-  max-width: 42rem;
-  font-size: clamp(1.35rem, 2vw, 2.2rem);
-  line-height: 1.15;
-  margin-top: 8px;
-}
-
-.hero-copy {
-  max-width: 44rem;
-  margin: 12px 0 0;
-  color: var(--muted);
-}
-
 .hero-rail {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -962,8 +1043,7 @@ img.brand-mark:hover {
 }
 
 .hero-rail-item strong,
-.metric-value,
-.networth-value {
+.metric-value {
   display: block;
   font-size: clamp(1.15rem, 1.6vw, 1.55rem);
   margin-top: 6px;
@@ -984,9 +1064,7 @@ img.brand-mark:hover {
 
 .metric-delta,
 .transaction-row p,
-.category-row p,
-.networth-copy,
-.bottom-note span {
+.category-row p {
   color: var(--muted);
 }
 
@@ -996,10 +1074,6 @@ img.brand-mark:hover {
   gap: var(--grid-gap);
   margin-bottom: var(--grid-gap);
   min-width: 0;
-}
-
-.secondary-grid {
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.85fr);
 }
 
 .panel {
@@ -1378,8 +1452,7 @@ img.brand-mark:hover {
   padding-top: 6px;
 }
 
-.transaction-row strong,
-.networth-value {
+.transaction-row strong {
   letter-spacing: -0.02em;
 }
 
@@ -1391,49 +1464,12 @@ img.brand-mark:hover {
   color: var(--danger);
 }
 
-.networth-panel {
-  display: flex;
-  flex-direction: column;
-}
-
-.networth-value {
-  font-size: clamp(1.65rem, 2.5vw, 2.6rem);
-}
-
-.stacked-bars {
-  display: grid;
-  gap: 12px;
-  margin: 24px 0;
-}
-
-.stacked-bar {
-  height: 18px;
-  border-radius: var(--radius-full);
-}
-
-.stacked-bar.assets {
-  width: 78%;
-  background: linear-gradient(90deg, var(--success), var(--success-strong));
-}
-
-.stacked-bar.liabilities {
-  width: 28%;
-  background: linear-gradient(90deg, var(--danger), var(--danger-strong));
-}
-
-.bottom-note {
-  justify-content: space-between;
-  padding-top: 16px;
-  border-top: 1px solid var(--divider);
-}
-
 @media (max-width: 1180px) {
   :root {
     --sidebar-width: 210px;
   }
 
   .content-grid,
-  .secondary-grid,
   .transactions-layout,
   .budget-layout,
   .report-layout,
@@ -1448,10 +1484,11 @@ img.brand-mark:hover {
   .editor-panel {
     position: static;
     top: auto;
+    max-height: none;
+    overflow-y: visible;
   }
 
-  .category-row,
-  .subcategory-row {
+  .category-row {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -1590,18 +1627,13 @@ img.brand-mark:hover {
     max-width: 100%;
   }
 
-  .hero h3 {
-    font-size: 1.3rem;
+  .hero-rail {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .hero-rail-item strong,
   .metric-value {
     font-size: 1.25rem;
-    word-break: break-word;
-  }
-
-  .networth-value {
-    font-size: 1.85rem;
     word-break: break-word;
   }
 
@@ -1909,7 +1941,6 @@ img.brand-mark:hover {
 /* Numeric alignment: monetary and tabular values use lining tabular figures */
 .amount,
 .metric-value,
-.networth-value,
 .card-value,
 .bar-value,
 .hero-rail-item strong,
